@@ -1,0 +1,113 @@
+:root {
+  --wall: #ebe6dc;
+  --ink: #1d1b19;
+  --panel: rgba(29, 27, 25, 0.92);
+  --panel-ink: #f4efe6;
+  --muted: #a39d93;
+  --accent: #ff4d2e;
+  --radius: 10px;
+  color-scheme: light;
+  font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--wall); color: var(--ink); }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+#wall { position: fixed; inset: 0; width: 100vw; height: 100vh; touch-action: none; display: block; }
+#wall.pan { cursor: grab; }
+#wall.panning { cursor: grabbing; }
+#wall.who { cursor: help; }
+#wall.paint { cursor: crosshair; }
+
+#tools, #paint, #nav, #people, #whoPop, #toast, #welcome {
+  position: fixed;
+  background: var(--panel);
+  color: var(--panel-ink);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(6px);
+}
+
+/* ---- tools (left) */
+#tools { left: 12px; top: 50%; transform: translateY(-50%); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+#tools hr { width: 70%; border: 0; border-top: 1px solid #3c3833; margin: 4px auto; }
+#tools button {
+  width: 52px; height: 46px; border: 0; border-radius: 8px; background: transparent;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
+}
+#tools button span { font-size: 18px; }
+#tools button small { font-size: 10px; color: var(--muted); margin-top: 3px; }
+#tools button:hover { background: #34302b; }
+#tools button.on { background: var(--accent); }
+#tools button.on small { color: var(--panel-ink); }
+
+/* ---- paint (bottom) */
+#paint {
+  left: 50%; bottom: 12px; transform: translateX(-50%);
+  padding: 8px 12px; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 24px); overflow-x: auto;
+}
+#swatches { display: flex; gap: 4px; }
+.sw { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; padding: 0; flex: none; }
+.sw.on, .custom.on { border-color: var(--panel-ink); box-shadow: 0 0 0 2px var(--accent); }
+.custom { width: 28px; height: 28px; border-radius: 50%; overflow: hidden; border: 2px solid #5a544c; flex: none; position: relative;
+  background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+.custom input { opacity: 0; position: absolute; inset: -8px; width: 44px; height: 44px; cursor: pointer; }
+.slider { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); min-width: 110px; }
+.slider input { accent-color: var(--accent); }
+.check { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.check input { accent-color: var(--accent); }
+
+/* ---- nav (top left) */
+#nav { left: 12px; top: 12px; padding: 6px; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; max-width: calc(100vw - 300px); }
+#nav button { border: 0; background: #34302b; border-radius: 7px; padding: 6px 10px; white-space: nowrap; }
+#nav button:hover { background: #4a453e; }
+#nav #zoom { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; font-size: 12px; }
+#where { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); }
+
+/* ---- people (right) */
+#people { right: 12px; top: 12px; width: 250px; padding: 10px 12px; max-height: calc(100vh - 100px); display: flex; flex-direction: column; }
+#people header { display: flex; justify-content: space-between; align-items: center; }
+#people header a { color: var(--muted); font-size: 12px; }
+#peopleToggle { border: 0; background: none; padding: 0; font-weight: 600; }
+#online { font-weight: 400; color: var(--muted); font-size: 12px; }
+#peopleBody { overflow-y: auto; margin-top: 8px; }
+#people.closed #peopleBody { display: none; }
+.me { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.me input { flex: 1; min-width: 0; background: #34302b; border: 1px solid #4a453e; border-radius: 6px; padding: 4px 6px; color: var(--panel-ink); }
+#painters { list-style: none; margin: 8px 0; padding: 0; }
+#painters li { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid #2f2b27; font-size: 13px; }
+#painters li .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+#painters li .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#painters li .n { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+#painters li.off .nm { text-decoration: line-through; color: var(--muted); }
+#painters li button { border: 0; background: #34302b; border-radius: 6px; padding: 2px 8px; font-size: 11px; }
+#painters li.live .nm::after { content: " ●"; color: #4ade80; font-size: 10px; }
+#showAll { width: 100%; border: 0; background: var(--accent); border-radius: 6px; padding: 5px; margin-bottom: 6px; }
+.hint { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
+
+/* ---- popups */
+#whoPop { padding: 8px 10px; font-size: 13px; z-index: 5; }
+#whoPop button { border: 0; background: var(--accent); border-radius: 6px; padding: 3px 8px; margin-left: 8px; }
+#toast { left: 50%; top: 14px; transform: translateX(-50%); padding: 8px 14px; z-index: 6; }
+
+#welcome { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100vw - 32px)); padding: 20px 22px; z-index: 10; }
+#welcome h1 { margin: 0 0 8px; font-size: 26px; letter-spacing: 0.02em; }
+#welcome ul { padding-left: 18px; }
+#welcome li { margin: 4px 0; }
+#welcome kbd { background: #34302b; border-radius: 4px; padding: 0 5px; font-size: 12px; }
+#start { border: 0; background: var(--accent); border-radius: 8px; padding: 8px 16px; font-weight: 600; }
+
+[hidden] { display: none !important; }
+
+/* ---- small screens: tools along the bottom, panels tuck away */
+@media (max-width: 720px) {
+  #tools { top: auto; bottom: 74px; left: 50%; transform: translateX(-50%); flex-direction: row; max-width: calc(100vw - 16px); overflow-x: auto; }
+  #tools hr { display: none; }
+  #tools button { width: 44px; flex: none; }
+  #nav { max-width: calc(100vw - 24px); }
+  #nav #share { display: none; }
+  #people { top: auto; bottom: 136px; width: auto; left: 12px; max-height: 40vh; }
+  #paint { left: 8px; right: 8px; transform: none; bottom: 8px; }
+}
