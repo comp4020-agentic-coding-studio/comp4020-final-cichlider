@@ -24,30 +24,32 @@ const player = async (): Promise<Player> => (await call("POST", "/api/session", 
 const input = (who: Player, move: number, turn: number) => call("POST", "/api/input", who, { move, turn });
 const rollerOf = (state: any, id: string) => state.rollers.find((r: any[]) => r[0] === id);
 
-// Reads the event stream until `until` says yes, or gives up after `ms`.
-async function watch(until: (tick: any) => boolean, ms = 3000): Promise<number> {
+// Opens the event stream and waits for its first tick, so the time it takes to
+// connect (TLS, or a machine waking up) isn't counted as sync delay. Then
+// `until` resolves with the moment a tick satisfies `pred`, or 0 after `ms`.
+async function stream(): Promise<{ until: (pred: (tick: any) => boolean, ms?: number) => Promise<number>; close: () => void }> {
   const ctrl = new AbortController();
   const res = await fetch(new URL("/api/events", baseUrl), { signal: ctrl.signal });
   const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
-  const t0 = Date.now();
   let buf = "";
-  try {
+  async function until(pred: (tick: any) => boolean, ms = 3000): Promise<number> {
+    const t0 = Date.now();
     while (Date.now() - t0 < ms) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) return 0;
       buf += value;
       const lines = buf.split("\n");
       buf = lines.pop() ?? "";
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
         const ev = JSON.parse(line.slice(6));
-        if (ev.type === "tick" && until(ev)) return Date.now();
+        if (ev.type === "tick" && pred(ev)) return Date.now();
       }
     }
     return 0;
-  } finally {
-    ctrl.abort();
   }
+  await until(() => true, 15_000);
+  return { until, close: () => ctrl.abort() };
 }
 
 describe("a stranger joins in", () => {
@@ -84,34 +86,42 @@ describe("a stranger joins in", () => {
   });
 });
 
-describe("the floor is shared, live", { timeout: 10_000 }, () => {
+describe("the floor is shared, live", { timeout: 25_000 }, () => {
   it("shows a roller moving to another open session within a second", async () => {
     const a = await player();
     await input(a, 0, 0);
     const start = rollerOf((await call("GET", "/api/state")).data, a.id);
-    const t0 = Date.now();
-    const seen = watch((tick) => {
-      const r = tick.r.find((x: any[]) => x[0] === a.id);
-      return r && Math.hypot(r[2] - start[2], r[3] - start[3]) > 5;
-    });
-    await input(a, 1, 0);
-    const seenAt = await seen;
-    await input(a, 0, 0);
-    expect(seenAt, "the roller never moved on the other session's stream").toBeGreaterThan(0);
-    expect(seenAt - t0).toBeLessThan(1000);
+    const other = await stream();
+    try {
+      const t0 = Date.now();
+      await input(a, 1, 0);
+      const seenAt = await other.until((tick) => {
+        const r = tick.r.find((x: any[]) => x[0] === a.id);
+        return r && Math.hypot(r[2] - start[2], r[3] - start[3]) > 5;
+      });
+      expect(seenAt, "the roller never moved on the other session's stream").toBeGreaterThan(0);
+      expect(seenAt - t0).toBeLessThan(1000);
+    } finally {
+      other.close();
+      await input(a, 0, 0);
+    }
   });
 
   it("paints the player's team colour where it rolls", async () => {
     const a = await player();
     await input(a, 0, 0);
-    const seen = watch((tick) => {
-      for (let i = 1; i < tick.c.length; i += 2) if (tick.c[i] === a.team + 1) return true;
-      return false;
-    });
-    await input(a, 1, 1);
-    const at = await seen;
-    await input(a, 0, 0);
-    expect(at, "no paint in the player's colour came down the stream").toBeGreaterThan(0);
+    const other = await stream();
+    try {
+      await input(a, 1, 1);
+      const at = await other.until((tick) => {
+        for (let i = 1; i < tick.c.length; i += 2) if (tick.c[i] === a.team + 1) return true;
+        return false;
+      });
+      expect(at, "no paint in the player's colour came down the stream").toBeGreaterThan(0);
+    } finally {
+      other.close();
+      await input(a, 0, 0);
+    }
   });
 
   it("sends a snapshot that agrees with its own score", async () => {

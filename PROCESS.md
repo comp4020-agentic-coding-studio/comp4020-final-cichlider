@@ -243,6 +243,20 @@ density, on desktop and on a touch-emulated phone, and checked the screenshots.
   dark panel. Both scores are now in the light colour, with the team dot
   marking which is which.
 
+**After deploying.** CI's check and deploy both passed. Running the spec
+against the live site from my laptop, the "within a second" test failed, at 4
+to 6 seconds. Two separate things were going on:
+
+- The test started its clock before opening the event stream, so connecting
+  counted as sync delay. Locally connecting is instant, so it never showed.
+  The test now connects first, waits for a tick, and only then times the move.
+- My laptop's route to Fly went through the Paris edge (`fly-request-id …-cdg`)
+  and took 1.5 to 3 s per request, so no app could beat a second from here.
+  Once connected, the stream itself delivered a tick roughly every 100 ms.
+
+The honest check of the one-second promise is from where it will be played: on
+phones in the crit room, close to the Sydney region.
+
 ## Decision record 2: the later roller wins
 
 When two teams roll over the same cell, the later roller (in the server's
