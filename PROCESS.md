@@ -112,6 +112,11 @@ Headless-Chrome screenshots at 1280×800 and at 390 px wide checked the layout.
   fits.
 - When seeding test paint, back-to-back strokes from one player were refused.
   That was the ink tank working as designed, not a bug.
+- The spec failed once out of many runs. A test that landed in the last
+  seconds of a round waited for the next one, which took longer than vitest's
+  5-second limit. I reproduced it by looping the spec across round boundaries,
+  gave the round-waiting tests 30 seconds, then ran the loop 45 times with no
+  failures.
 
 **Kept, deliberately.** The crit-8 `strokes` table is still on the Fly volume,
 untouched. Turf war writes to new `paint` and `rounds` tables. Rather than

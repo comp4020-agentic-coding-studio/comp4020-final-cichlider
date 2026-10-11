@@ -40,15 +40,16 @@ const roll = (points: number[], extra: object = {}) => ({
   ...extra,
 });
 
-// The tests only paint while a round is on; if they land in the break between
-// rounds, they wait for the next one.
+// The tests only paint while a round is on; if they land at the end of one,
+// they wait out the break for the next, so these get longer than vitest's 5s.
+const WAIT = 30_000;
 async function liveRound(): Promise<any> {
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 50; i++) {
     const r = await call("GET", "/api/round");
     if (r.data.round && r.data.round.endsAt - r.data.now > 5000) return r.data;
     await new Promise((ok) => setTimeout(ok, 500));
   }
-  throw new Error("no round started within 30s");
+  throw new Error("no round started within 25s");
 }
 
 describe("a stranger joins in", () => {
@@ -67,7 +68,7 @@ describe("a stranger joins in", () => {
   });
 });
 
-describe("the floor is shared, live", () => {
+describe("the floor is shared, live", { timeout: WAIT }, () => {
   it("shows one player's paint to everyone else in this round", async () => {
     const g = await liveRound();
     const a = await player();
@@ -107,7 +108,7 @@ describe("the floor is shared, live", () => {
   });
 });
 
-describe("the last roller wins", () => {
+describe("the last roller wins", { timeout: WAIT }, () => {
   it("hands a strip of floor to the team that rolled over it last", async () => {
     await liveRound();
     const [a, b] = await rivals();
@@ -132,7 +133,7 @@ describe("the last roller wins", () => {
   });
 });
 
-describe("nobody can flood the floor", () => {
+describe("nobody can flood the floor", { timeout: WAIT }, () => {
   it("refuses a stroke longer than a full tank of ink", async () => {
     const g = await liveRound();
     const a = await player();
