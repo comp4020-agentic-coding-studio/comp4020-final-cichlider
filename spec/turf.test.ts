@@ -1,7 +1,7 @@
 import { describe, expect, inject, it } from "vitest";
 
-// Turf war's promises, checked against the running app. Every test makes its
-// own fresh players, so each starts with a full tank.
+// Turf war's promises, checked against the running app. Each test makes its
+// own fresh players; they leave the floor on their own once they go quiet.
 const baseUrl = inject("baseUrl");
 
 interface Player {
@@ -21,35 +21,33 @@ async function call(method: string, path: string, who?: Player, body?: unknown):
 }
 
 const player = async (): Promise<Player> => (await call("POST", "/api/session", undefined, {})).data;
+const input = (who: Player, move: number, turn: number) => call("POST", "/api/input", who, { move, turn });
+const rollerOf = (state: any, id: string) => state.rollers.find((r: any[]) => r[0] === id);
 
-// One player from each side. Newcomers join the smaller side, so a few tries
-// is plenty.
-async function rivals(): Promise<[Player, Player]> {
-  const a = await player();
-  for (let i = 0; i < 8; i++) {
-    const b = await player();
-    if (b.team !== a.team) return [a, b];
+// Reads the event stream until `until` says yes, or gives up after `ms`.
+async function watch(until: (tick: any) => boolean, ms = 3000): Promise<number> {
+  const ctrl = new AbortController();
+  const res = await fetch(new URL("/api/events", baseUrl), { signal: ctrl.signal });
+  const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
+  const t0 = Date.now();
+  let buf = "";
+  try {
+    while (Date.now() - t0 < ms) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const ev = JSON.parse(line.slice(6));
+        if (ev.type === "tick" && until(ev)) return Date.now();
+      }
+    }
+    return 0;
+  } finally {
+    ctrl.abort();
   }
-  throw new Error("couldn't get two players on different teams");
-}
-
-const roll = (points: number[], extra: object = {}) => ({
-  tool: "roller",
-  seed: Math.floor(Math.random() * 1e9),
-  points,
-  ...extra,
-});
-
-// The tests only paint while a round is on; if they land at the end of one,
-// they wait out the break for the next, so these get longer than vitest's 5s.
-const WAIT = 30_000;
-async function liveRound(): Promise<any> {
-  for (let i = 0; i < 50; i++) {
-    const r = await call("GET", "/api/round");
-    if (r.data.round && r.data.round.endsAt - r.data.now > 5000) return r.data;
-    await new Promise((ok) => setTimeout(ok, 500));
-  }
-  throw new Error("no round started within 25s");
 }
 
 describe("a stranger joins in", () => {
@@ -61,119 +59,82 @@ describe("a stranger joins in", () => {
     expect(back.data).toMatchObject({ id: a.id, name: a.name, team: a.team });
   });
 
-  it("joins whichever side has fewer players right now", async () => {
-    const before = (await call("GET", "/api/round")).data.players as [number, number];
+  it("joins whichever side has fewer people on the floor right now", async () => {
+    const before = (await call("GET", "/api/state")).data.humans as [number, number];
     const a = await player();
     expect(before[a.team]).toBeLessThanOrEqual(before[1 - a.team]);
   });
-});
 
-describe("the floor is shared, live", { timeout: WAIT }, () => {
-  it("shows one player's paint to everyone else in this round", async () => {
-    const g = await liveRound();
+  it("is on the floor as a roller as soon as it does anything, even stand still", async () => {
     const a = await player();
-    const r = await call("POST", "/api/strokes", a, roll([-900, -600, -700, -600]));
-    expect(r.status, JSON.stringify(r.data)).toBe(201);
-    const later = await call("GET", "/api/strokes");
-    expect(later.data.roundId).toBe(g.round.id);
-    expect(later.data.strokes.find((s: any) => s.id === r.data.id)).toMatchObject({ author: a.id, team: a.team });
+    expect((await input(a, 0, 0)).status).toBe(202);
+    const s = (await call("GET", "/api/state")).data;
+    expect(rollerOf(s, a.id)?.slice(0, 2)).toEqual([a.id, a.team]);
   });
 
-  it("reaches another open session within a second", async () => {
-    await liveRound();
+  it("finds bots filling each team up to the minimum, and only up to it", async () => {
     const a = await player();
-    const ctrl = new AbortController();
-    const res = await fetch(new URL("/api/events", baseUrl), { signal: ctrl.signal });
-    const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
-    const seed = 424242 + Math.floor(Math.random() * 1000);
-
-    const t0 = Date.now();
-    const posted = call("POST", "/api/strokes", a, roll([-900, 600, -700, 600], { seed }));
-    let buf = "";
-    let seenAt = 0;
-    while (!seenAt && Date.now() - t0 < 3000) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += value;
-      for (const line of buf.split("\n")) {
-        if (!line.startsWith("data: ")) continue;
-        const ev = JSON.parse(line.slice(6));
-        if (ev.type === "stroke" && ev.stroke.seed === seed) seenAt = Date.now();
-      }
+    await input(a, 0, 0);
+    const s = (await call("GET", "/api/state")).data;
+    for (const team of [0, 1]) {
+      const humans = s.rollers.filter((r: any[]) => r[1] === team && r[6] === 0).length;
+      const bots = s.rollers.filter((r: any[]) => r[1] === team && r[6] === 1).length;
+      expect(bots, `team ${team} has ${humans} people`).toBe(Math.max(0, s.minPerTeam - humans));
     }
-    ctrl.abort();
-    expect((await posted).status).toBe(201);
-    expect(seenAt, "the paint never arrived on the other session's stream").toBeGreaterThan(0);
+  });
+});
+
+describe("the floor is shared, live", { timeout: 10_000 }, () => {
+  it("shows a roller moving to another open session within a second", async () => {
+    const a = await player();
+    await input(a, 0, 0);
+    const start = rollerOf((await call("GET", "/api/state")).data, a.id);
+    const t0 = Date.now();
+    const seen = watch((tick) => {
+      const r = tick.r.find((x: any[]) => x[0] === a.id);
+      return r && Math.hypot(r[2] - start[2], r[3] - start[3]) > 5;
+    });
+    await input(a, 1, 0);
+    const seenAt = await seen;
+    await input(a, 0, 0);
+    expect(seenAt, "the roller never moved on the other session's stream").toBeGreaterThan(0);
     expect(seenAt - t0).toBeLessThan(1000);
   });
-});
 
-describe("the last roller wins", { timeout: WAIT }, () => {
-  it("hands a strip of floor to the team that rolled over it last", async () => {
-    await liveRound();
-    const [a, b] = await rivals();
-    const strip = [600, -300, 1000, -300];
-    const first = await call("POST", "/api/strokes", a, roll(strip));
-    const second = await call("POST", "/api/strokes", b, roll(strip));
-    expect(first.status).toBe(201);
-    expect(second.status).toBe(201);
-    expect(second.data.roundId, "a round ended mid-test").toBe(first.data.roundId);
-    // b took the strip off a: a lost cells, b gained them
-    expect(second.data.cells[a.team]).toBeLessThan(first.data.cells[a.team]);
-    expect(second.data.cells[b.team]).toBeGreaterThan(first.data.cells[b.team]);
-  });
-
-  it("paints in the team's colour, whatever colour the client asks for", async () => {
-    await liveRound();
+  it("paints the player's team colour where it rolls", async () => {
     const a = await player();
-    const r = await call("POST", "/api/strokes", a, roll([0, 400, 100, 400], { color: "#000000", team: 1 - a.team }));
-    expect(r.status).toBe(201);
-    expect(r.data.team).toBe(a.team);
-    expect(r.data.color).toBeUndefined();
-  });
-});
-
-describe("nobody can flood the floor", { timeout: WAIT }, () => {
-  it("refuses a stroke longer than a full tank of ink", async () => {
-    const g = await liveRound();
-    const a = await player();
-    const { x0, x1 } = g.arena;
-    const zigzag = [x0, 0, x1, 0, x0, 50, x1, 50]; // ~7200 units, a full tank is far less
-    const r = await call("POST", "/api/strokes", a, roll(zigzag));
-    expect(r.status).toBe(409);
-    expect(r.data.error).toMatch(/ink/);
+    await input(a, 0, 0);
+    const seen = watch((tick) => {
+      for (let i = 1; i < tick.c.length; i += 2) if (tick.c[i] === a.team + 1) return true;
+      return false;
+    });
+    await input(a, 1, 1);
+    const at = await seen;
+    await input(a, 0, 0);
+    expect(at, "no paint in the player's colour came down the stream").toBeGreaterThan(0);
   });
 
-  it("won't take paint without a player", async () => {
-    expect((await call("POST", "/api/strokes", undefined, roll([0, 0, 10, 0]))).status).toBe(401);
-  });
-
-  it("refuses paint that isn't a roller stroke on the floor", async () => {
-    await liveRound();
-    const a = await player();
-    for (const bad of [
-      roll([0, 0, 10, 0], { tool: "flamethrower" }),
-      roll([0, 0, 10, 0], { tool: "pen" }),
-      roll([1, 2, 3]),
-      roll([0, 0, 99999, 0]),
-      roll(Array(4001 * 2).fill(0)),
-    ]) {
-      expect((await call("POST", "/api/strokes", a, bad)).status, JSON.stringify(bad).slice(0, 80)).toBe(400);
+  it("sends a snapshot that agrees with its own score", async () => {
+    const s = (await call("GET", "/api/state")).data;
+    const tally = [0, 0];
+    for (let i = 1; i < s.cells.length; i += 3) tally[s.cells[i] - 1]++;
+    expect(tally).toEqual(s.s);
+    for (let i = 2; i < s.cells.length; i += 3) {
+      expect(s.cells[i]).toBeGreaterThanOrEqual(0);
+      expect(s.cells[i]).toBeLessThan(s.fadeMs);
     }
   });
 });
 
-describe("rounds", () => {
-  it("is either mid-round with time on the clock, or between rounds with a result to show", async () => {
-    const g = (await call("GET", "/api/round")).data;
-    expect(g.teams).toHaveLength(2);
-    if (g.round) {
-      expect(g.round.endsAt).toBeGreaterThan(g.now);
-      expect(g.round.endsAt - g.round.startedAt).toBe(g.roundMs);
-      expect(g.cells[0] + g.cells[1]).toBeLessThanOrEqual(g.total);
-    } else {
-      expect(g.nextAt).toBeGreaterThan(g.now);
-      expect(g.lastResult).not.toBeNull();
+describe("only the five actions", () => {
+  it("won't move a roller without a player", async () => {
+    expect((await call("POST", "/api/input", undefined, { move: 1, turn: 0 })).status).toBe(401);
+  });
+
+  it("refuses anything that isn't forward, back, left, right or still", async () => {
+    const a = await player();
+    for (const bad of [{ move: 2, turn: 0 }, { move: 1, turn: "left" }, { move: 1 }, { x: 0, y: 0 }, { move: 0.5, turn: 0 }]) {
+      expect((await call("POST", "/api/input", a, bad)).status, JSON.stringify(bad)).toBe(400);
     }
   });
 });

@@ -14,7 +14,10 @@
     "noEmit": true,
     "skipLibCheck": true,
     "moduleDetection": "force",
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    // node runs server/ by stripping types, so syntax that needs compiling
+    // (parameter properties, enums) has to fail here rather than at boot
+    "erasableSyntaxOnly": true
   },
   "include": ["*.ts", "spec", "scripts", "server"]
 }

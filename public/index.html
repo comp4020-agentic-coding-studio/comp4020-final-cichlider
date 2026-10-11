@@ -4,55 +4,56 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
     <title>Turf War</title>
-    <meta name="description" content="Two teams, one floor, two and a half minutes. Roll your colour over as much of it as you can." />
+    <meta name="description" content="You're a paint roller. Two teams, one floor, no time limit: keep as much of it in your colour as you can." />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <canvas id="wall" class="paint" aria-label="The arena. Drag to roll paint."></canvas>
+    <canvas id="wall" aria-label="The floor, seen from above at an angle. Your roller is circled."></canvas>
 
     <header id="hud" aria-label="Score">
-      <div id="side0" class="side"><b id="pct0">0%</b><small id="name0">Pink</small></div>
+      <div id="side0" class="side"><b id="pct0">0%</b><small id="name0">Yellow</small></div>
       <div class="gauge" aria-hidden="true"><span id="bar0"></span><span id="bar1"></span></div>
-      <output id="clock">2:30</output>
-      <div id="side1" class="side"><b id="pct1">0%</b><small id="name1">Lime</small></div>
+      <div id="side1" class="side"><b id="pct1">0%</b><small id="name1">Indigo</small></div>
     </header>
 
     <section id="me" aria-label="You">
-      <div id="inkWrap" title="Ink: rolling uses it, and it refills on its own">
-        <div id="ink"></div>
-      </div>
       <div class="who">
         <span id="teamTag">…</span>
         <input id="name" maxlength="24" spellcheck="false" aria-label="your tag" />
       </div>
+      <div id="palettes" role="group" aria-label="Colours"></div>
       <span id="online"></span>
       <a href="/readme/" title="What this is">about</a>
     </section>
 
-    <section id="nav" aria-label="View">
-      <button id="zoomOut" title="Zoom out">−</button>
-      <button id="fit" title="See the whole arena">⤢</button>
-      <button id="zoomIn" title="Zoom in">+</button>
+    <section id="nav" aria-label="Zoom">
+      <button id="zoomOut" title="Zoom out (-)">−</button>
+      <button id="zoomIn" title="Zoom in (+)">+</button>
     </section>
 
-    <div id="result" hidden>
-      <p id="resultTitle"></p>
-      <p id="resultScore"></p>
-      <p id="resultNext"></p>
-    </div>
+    <nav id="pad" aria-label="Controls">
+      <div class="turn">
+        <button data-act="left" aria-label="turn left">⟲</button>
+        <button data-act="right" aria-label="turn right">⟳</button>
+      </div>
+      <div class="drive">
+        <button data-act="fwd" aria-label="forward">▲</button>
+        <button data-act="back" aria-label="back">▼</button>
+      </div>
+    </nav>
 
     <div id="toast" role="status" hidden></div>
 
     <div id="welcome" hidden>
       <h1><span class="t0">Turf</span> <span class="t1">War</span></h1>
-      <p>Two teams, one floor. When the clock runs out, the team whose colour covers more of it wins.</p>
+      <p>You're a paint roller. Wherever you roll turns your team's colour. Paint nobody rolls over again fades away, so keep your turf fresh, and take theirs.</p>
       <ul>
-        <li><b>Roll:</b> drag across the floor. Your roller paints your team's colour, over anything.</li>
-        <li><b>Ink:</b> rolling drains your tank. Lift off and it refills.</li>
-        <li><b>Look around:</b> hold <kbd>Space</kbd> and drag, two fingers, or scroll. <kbd>Ctrl</kbd>+scroll or pinch to zoom.</li>
+        <li><b>Drive:</b> <kbd>W</kbd>/<kbd>S</kbd> or <kbd>↑</kbd>/<kbd>↓</kbd> forward and back, <kbd>A</kbd>/<kbd>D</kbd> or <kbd>←</kbd>/<kbd>→</kbd> to turn. On a phone, use the buttons.</li>
+        <li><b>Bots</b> 🤖 fill in when there aren't enough people, and step out when someone joins.</li>
+        <li><b>Colours:</b> pick a pair at the bottom. It only changes your screen.</li>
       </ul>
       <p id="welcomeTeam"></p>
-      <button id="start">let's go</button>
+      <button id="start">let's roll</button>
     </div>
 
     <script type="module" src="/app.js"></script>

@@ -1,10 +1,12 @@
-import { VOID, drawFloor, drawRim, drawStroke } from "./render.js";
+import { PALETTES } from "./palettes.js";
+import { FLOOR, drawRoller, drawSlab, drawTag, drawTiles, makeView, paintFloor } from "./render.js";
 
 const $ = (s) => document.querySelector(s);
 const canvas = $("#wall");
 const ctx = canvas.getContext("2d");
-const base = document.createElement("canvas"); // committed paint, redrawn only when it or the view changes
-const bctx = base.getContext("2d");
+const floorCanvas = document.createElement("canvas"); // one pixel per cell
+const fctx = floorCanvas.getContext("2d");
+let floorImg = null;
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
@@ -13,213 +15,138 @@ const store = {
 
 // ---------------------------------------------------------------- state
 
-const cam = { x: 0, y: 0, z: 1 }; // arena point at screen centre; screen px per arena unit
-let fitted = true; // follow the window size until someone zooms or pans
 let W = 0, H = 0, dpr = 1;
-const strokes = new Map(); // id -> stroke, this round only
-let order = [];
-let orderDirty = true;
-const names = new Map(); // painter id -> tag
-const live = new Map(); // painter id -> { name, team, cursor, partial, at }
+const cam = { x: 0, y: 0, z: 0.5 }; // arena point at screen centre, and zoom
+let zoomFactor = store.get("turf.zoom", 1);
 let me = null;
-let game = null; // what /api/round says: arena, teams, ink, the round's clock
-let skew = 0; // server clock minus ours
-let cells = [0, 0];
-const pendingBySeed = new Map(); // optimistic strokes awaiting their id
-const tank = { ink: 0, at: 0 };
+let game = null; // the fixed facts from /api/state: arena, cell size, roller width, fade time
+let cells = null; // owner per cell: 0 bare, 1 team 0, 2 team 1
+let painted = null; // game-clock ms each cell was last painted
+let gameNow = 0;
+let score = [0, 0];
+let floorDirty = true;
+const rollers = new Map(); // id -> { team, npc, name, move, x, y, h (shown), tx, ty, th (latest from server) }
+let palette = PALETTES.find((p) => p.id === store.get("turf.palette", "default")) ?? PALETTES[0];
 
-let baseDirty = true, dirty = true;
-const redraw = (all = true) => { dirty = true; if (all) baseDirty = true; };
-const serverNow = () => Date.now() + skew;
-const colorOf = (team) => game?.teams[team]?.color ?? "#888";
+const colorOf = (team) => palette.teams[team].color;
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
-// ---------------------------------------------------------------- coordinates
-
-const toArena = (sx, sy) => [cam.x + (sx - W / 2) / cam.z, cam.y + (sy - H / 2) / cam.z];
-const clampToArena = ([x, y]) => {
-  const a = game.arena;
-  return [Math.max(a.x0, Math.min(a.x1, x)), Math.max(a.y0, Math.min(a.y1, y))];
-};
-
-function fit() {
-  if (!game) return;
-  const a = game.arena;
-  // room for the score across the top and your tank along the bottom
-  const z = Math.min(W / (a.x1 - a.x0 + 120), (H - 150) / (a.y1 - a.y0 + 60));
-  Object.assign(cam, { x: (a.x0 + a.x1) / 2, y: (a.y0 + a.y1) / 2 + 10 / z, z });
-  fitted = true;
-  redraw();
-}
+// ---------------------------------------------------------------- drawing
 
 function resize() {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   W = window.innerWidth;
   H = window.innerHeight;
-  for (const c of [canvas, base]) {
-    c.width = Math.round(W * dpr);
-    c.height = Math.round(H * dpr);
-  }
-  if (fitted) fit();
-  redraw();
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
 }
 
-// ---------------------------------------------------------------- drawing the arena
+// Close enough to see the roller and what's around it; phones get a bit
+// further out so there's room to plan a route.
+const baseZoom = () => Math.max(0.4, Math.min(1, Math.max(W, H) / 1250));
 
-function setView(c) {
-  c.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * (W / 2 - cam.x * cam.z), dpr * (H / 2 - cam.y * cam.z));
-}
-
-function clipArena(c) {
-  const a = game.arena;
-  c.beginPath();
-  c.rect(a.x0, a.y0, a.x1 - a.x0, a.y1 - a.y0);
-  c.clip();
-}
-
-function drawBase() {
-  bctx.setTransform(1, 0, 0, 1, 0, 0);
-  bctx.fillStyle = VOID;
-  bctx.fillRect(0, 0, base.width, base.height);
-  if (!game) return;
-  setView(bctx);
-  drawFloor(bctx, game.arena, game.cell, cam.z);
-  if (orderDirty) {
-    order = [...strokes.values()].sort((a, b) => a.id - b.id);
-    orderDirty = false;
-  }
-  bctx.save();
-  clipArena(bctx);
-  for (const s of order) drawStroke(bctx, s, colorOf(s.team), game.roller);
-  bctx.restore();
-  drawRim(bctx, game.arena, cam.z);
-}
-
-function render() {
-  if (baseDirty) {
-    drawBase();
-    baseDirty = false;
-  }
+function render(dt) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.drawImage(base, 0, 0);
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--void").trim() || "#120e24";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!game) return;
-  setView(ctx);
-  ctx.save();
-  clipArena(ctx);
-  const now = Date.now();
-  for (const [id, l] of live) {
-    if (now - l.at > 6000) { live.delete(id); continue; }
-    if (l.partial) drawStroke(ctx, l.partial, colorOf(l.team), game.roller);
-  }
-  if (drawing) drawStroke(ctx, drawing, colorOf(me.team), game.roller);
-  ctx.restore();
 
-  // cursors and tags, in screen space so they stay readable at any zoom
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.font = "700 12px ui-sans-serif, system-ui, sans-serif";
-  for (const [id, l] of live) {
-    if (!l.cursor || (me && id === me.id)) continue;
-    const sx = (l.cursor[0] - cam.x) * cam.z + W / 2, sy = (l.cursor[1] - cam.y) * cam.z + H / 2;
-    if (sx < -50 || sy < -50 || sx > W + 50 || sy > H + 50) continue;
-    ctx.globalAlpha = Math.max(0.2, 1 - (now - l.at) / 6000);
-    const r = Math.max(5, (game.roller / 2) * cam.z);
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "#0e0a1c";
-    ctx.fillStyle = colorOf(l.team);
-    ctx.beginPath();
-    ctx.arc(sx, sy, r, 0, Math.PI * 2);
-    ctx.stroke();
-    const label = l.name || "?";
-    const w = ctx.measureText(label).width + 12;
-    ctx.fillRect(sx + r + 4, sy - 10, w, 20);
-    ctx.strokeRect(sx + r + 4, sy - 10, w, 20);
-    ctx.fillStyle = "#0e0a1c";
-    ctx.fillText(label, sx + r + 10, sy + 4);
+  // ease every roller toward where the server last put it
+  const ease = Math.min(1, dt * 12);
+  for (const r of rollers.values()) {
+    r.x += (r.tx - r.x) * ease;
+    r.y += (r.ty - r.y) * ease;
+    r.h = wrap(r.h + wrap(r.th - r.h) * ease);
   }
-  ctx.globalAlpha = 1;
+
+  // the camera follows you
+  const mine = me && rollers.get(me.id);
+  const fx = mine ? mine.x : 0, fy = mine ? mine.y : 0;
+  cam.x += (fx - cam.x) * Math.min(1, dt * 5);
+  cam.y += (fy - cam.y) * Math.min(1, dt * 5);
+  cam.z = baseZoom() * zoomFactor;
+  const v = makeView(cam, W, H);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const a = game.arena;
+  drawSlab(ctx, v, a, palette.teams[1].color);
+
+  if (floorDirty) {
+    paintFloor(floorImg, cells, painted, gameNow, game.fadeMs, palette.teams.map((t) => t.color));
+    fctx.putImageData(floorImg, 0, 0);
+    floorDirty = false;
+  }
+  ctx.setTransform(...v.plane(dpr));
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(floorCanvas, a.x0, a.y0, a.x1 - a.x0, a.y1 - a.y0);
+  drawTiles(ctx, a, game.cell * 5, v.k);
+
+  // rollers, back to front
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const list = [...rollers.entries()].sort(([, p], [, q]) => p.x + p.y - (q.x + q.y));
+  for (const [id, r] of list) drawRoller(ctx, v, r, colorOf(r.team), game.roller, me && id === me.id);
+  for (const [id, r] of list) {
+    const isMe = me && id === me.id;
+    drawTag(ctx, v, r, isMe ? `${r.name} (you)` : r.npc ? `🤖 ${r.name}` : r.name, isMe ? "#ffffff" : colorOf(r.team), isMe);
+  }
 }
 
-function frame() {
-  if (dirty) {
-    dirty = false;
-    render();
-  }
-  if (live.size) dirty = true; // keep fading cursors moving
-  hud();
+let last = performance.now();
+function frame(t) {
+  const dt = Math.min(0.1, (t - last) / 1000);
+  last = t;
+  render(dt);
   requestAnimationFrame(frame);
 }
 
 // ---------------------------------------------------------------- the HUD
 
-const fmt = (ms) => {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-};
-const pct = (n) => (game ? (100 * n) / game.total : 0);
-
-let hudKey = "";
 function hud() {
   if (!game) return;
-  const now = serverNow();
-  const ink = inkNow();
-  const clock = game.round ? fmt(game.round.endsAt - now) : "—";
-  const late = game.round && game.round.endsAt - now < 10_000;
-  const key = `${cells}|${clock}|${Math.round(ink)}|${game.nextAt ? fmt(game.nextAt - now) : ""}`;
-  if (key === hudKey) return;
-  hudKey = key;
-
   for (const t of [0, 1]) {
-    $(`#pct${t}`).textContent = `${pct(cells[t]).toFixed(1)}%`;
-    $(`#bar${t}`).style.width = `${pct(cells[t])}%`;
+    const pct = (100 * score[t]) / game.total;
+    $(`#pct${t}`).textContent = `${pct.toFixed(1)}%`;
+    $(`#bar${t}`).style.width = `${pct}%`;
+    $(`#name${t}`).textContent = palette.teams[t].name;
   }
-  $("#clock").textContent = clock;
-  $("#clock").classList.toggle("late", Boolean(late));
-  if (me) {
-    $("#ink").style.height = `${(100 * ink) / game.ink.max}%`;
-    $("#inkWrap").classList.toggle("low", ink < game.ink.max * 0.15);
-  }
-  if (game.nextAt && !game.round) $("#resultNext").textContent = `next round in ${fmt(game.nextAt - now)}`;
+  let humans = 0, npcs = 0;
+  for (const r of rollers.values()) r.npc ? npcs++ : humans++;
+  $("#online").textContent = `${humans} ${humans === 1 ? "player" : "players"}${npcs ? ` · ${npcs} bots` : ""}`;
 }
 
-function applyTeams() {
+function applyPalette() {
   const root = document.documentElement.style;
-  for (const t of [0, 1]) {
-    root.setProperty(`--team-${t}`, game.teams[t].color);
-    $(`#name${t}`).textContent = game.teams[t].name;
-  }
+  root.setProperty("--team-0", palette.teams[0].color);
+  root.setProperty("--team-1", palette.teams[1].color);
+  root.setProperty("--light", palette.teams[0].color);
+  root.setProperty("--dark", palette.teams[1].color);
   if (me) {
     root.setProperty("--mine", colorOf(me.team));
-    $("#teamTag").textContent = `Team ${game.teams[me.team].name}`;
-    $("#welcomeTeam").innerHTML = "";
+    $("#teamTag").textContent = `Team ${palette.teams[me.team].name}`;
     const b = document.createElement("b");
-    b.textContent = `Team ${game.teams[me.team].name}`;
+    b.textContent = `Team ${palette.teams[me.team].name}`;
     b.style.color = colorOf(me.team);
-    $("#welcomeTeam").append("You're on ", b, ".");
+    $("#welcomeTeam").replaceChildren("You're on ", b, ".");
   }
+  for (const sw of document.querySelectorAll(".pal")) sw.classList.toggle("on", sw.dataset.id === palette.id);
+  floorDirty = true;
+  hud();
 }
 
-function showResult(r) {
-  if (!r) return;
-  const [a, b] = r.cells.map((n) => (100 * n) / r.total);
-  const title = $("#resultTitle");
-  if (r.winner === null) {
-    title.textContent = "Dead heat!";
-    title.style.color = "";
-  } else {
-    title.textContent = `${game.teams[r.winner].name} wins!`;
-    title.style.color = colorOf(r.winner);
-  }
-  $("#resultScore").textContent = `${a.toFixed(1)}% – ${b.toFixed(1)}%`;
-  $("#result").hidden = false;
-}
-
-// ---------------------------------------------------------------- ink
-
-function inkNow() {
-  if (!game) return 0;
-  const now = Date.now();
-  if (!drawing) tank.ink = Math.min(game.ink.max, tank.ink + ((now - tank.at) / 1000) * game.ink.rate);
-  tank.at = now;
-  return tank.ink;
+for (const p of PALETTES) {
+  const b = document.createElement("button");
+  b.className = "pal";
+  b.dataset.id = p.id;
+  b.title = `${p.teams[0].name} / ${p.teams[1].name}`;
+  b.setAttribute("aria-label", `${p.teams[0].name} and ${p.teams[1].name} colours`);
+  b.style.background = `linear-gradient(135deg, ${p.teams[0].color} 50%, ${p.teams[1].color} 50%)`;
+  b.onclick = () => {
+    palette = p;
+    store.set("turf.palette", p.id);
+    applyPalette();
+  };
+  $("#palettes").append(b);
 }
 
 // ---------------------------------------------------------------- talking to the server
@@ -231,307 +158,159 @@ async function api(method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), { status: res.status, data });
+  if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), { status: res.status });
   return data;
 }
 
-function addStroke(s) {
-  if (strokes.has(s.id)) return;
-  strokes.set(s.id, s);
-  orderDirty = true;
+function applyRollers(list, snap) {
+  const seen = new Set();
+  for (const [id, team, x, y, h, move, npc, name] of list) {
+    seen.add(id);
+    const r = rollers.get(id);
+    if (!r || snap) rollers.set(id, { team, npc: npc === 1, name, move, x, y, h, tx: x, ty: y, th: h });
+    else Object.assign(r, { team, npc: npc === 1, name, move, tx: x, ty: y, th: h });
+  }
+  for (const id of rollers.keys()) if (!seen.has(id)) rollers.delete(id);
 }
 
-async function loadRound() {
-  const t0 = Date.now();
-  const g = await api("GET", "/api/round");
-  skew = g.now - Math.round((t0 + Date.now()) / 2);
-  const first = !game;
-  game = g;
-  cells = g.cells;
-  if (first) { tank.ink = g.ink.max; tank.at = Date.now(); }
-  applyTeams();
-  if (first || fitted) fit();
-  if (g.round) $("#result").hidden = true;
-  else showResult(g.lastResult);
-  const data = await api("GET", "/api/strokes");
-  strokes.clear();
-  for (const [id, n] of Object.entries(data.names)) names.set(id, n);
-  for (const s of data.strokes) addStroke(s);
-  orderDirty = true;
-  redraw();
+async function loadState() {
+  const s = await api("GET", "/api/state");
+  game = s;
+  cells = new Uint8Array(s.cols * s.rows);
+  painted = new Float64Array(s.cols * s.rows);
+  for (let i = 0; i < s.cells.length; i += 3) {
+    cells[s.cells[i]] = s.cells[i + 1];
+    painted[s.cells[i]] = s.t - s.cells[i + 2];
+  }
+  floorCanvas.width = s.cols;
+  floorCanvas.height = s.rows;
+  floorImg = fctx.createImageData(s.cols, s.rows);
+  gameNow = s.t;
+  score = s.s;
+  applyRollers(s.rollers, true);
+  const mine = me && rollers.get(me.id);
+  if (mine) { cam.x = mine.x; cam.y = mine.y; }
+  floorDirty = true;
+  hud();
 }
 
+let lastFloorPaint = 0;
 function connect() {
   let first = true;
   const es = new EventSource("/api/events");
   es.onopen = () => {
-    if (!first) loadRound().catch(() => {}); // catch up on whatever we missed
+    if (!first) loadState().catch(() => {}); // catch up on whatever we missed
     first = false;
   };
   es.onmessage = (e) => {
     const m = JSON.parse(e.data);
-    if (m.type === "stroke") {
-      if (game?.round && m.stroke) {
-        names.set(m.stroke.author, m.name);
-        settle(m.stroke);
-        cells = m.cells;
-        const l = live.get(m.stroke.author);
-        if (l) l.partial = null;
-        redraw();
-      }
-    } else if (m.type === "round-start") {
-      game.round = m.round;
-      game.nextAt = null;
-      strokes.clear();
-      pendingBySeed.clear();
-      orderDirty = true;
-      cells = [0, 0];
-      $("#result").hidden = true;
-      toast("go! roll your colour everywhere");
-      redraw();
-    } else if (m.type === "round-end") {
-      game.round = null;
-      game.nextAt = m.nextAt;
-      cells = m.result.cells;
-      if (drawing) { drawing = null; sendLive({ done: true }); }
-      showResult(m.result);
-      redraw();
-    } else if (m.type === "name") {
-      names.set(m.id, m.name);
-      if (live.has(m.id)) live.get(m.id).name = m.name;
-      redraw(false);
-    } else if (m.type === "live") {
-      if (me && m.id === me.id) return;
-      const l = live.get(m.id) ?? {};
-      live.set(m.id, {
-        name: m.name,
-        team: m.team,
-        cursor: m.cursor ?? l.cursor,
-        partial: m.done ? null : m.partial ?? l.partial,
-        at: Date.now(),
-      });
-      names.set(m.id, m.name);
-      redraw(false);
-    } else if (m.type === "presence") {
-      $("#online").textContent = `${m.count} here`;
+    if (m.type !== "tick" || !game) return;
+    gameNow = m.t;
+    for (let i = 0; i < m.c.length; i += 2) {
+      cells[m.c[i]] = m.c[i + 1];
+      painted[m.c[i]] = m.t;
     }
+    // new paint shows at once; ageing paint only needs a refresh now and then
+    if (m.c.length || m.t - lastFloorPaint > 500) {
+      floorDirty = true;
+      lastFloorPaint = m.t;
+    }
+    score = m.s;
+    applyRollers(m.r, false);
+    hud();
   };
 }
 
-// A stroke of mine shows up twice, from the POST and from the stream; whichever
-// is first replaces the optimistic copy.
-function settle(s) {
-  const temp = pendingBySeed.get(s.seed);
-  if (temp !== undefined && s.author === me?.id) {
-    strokes.delete(temp);
-    pendingBySeed.delete(s.seed);
-    orderDirty = true;
-  }
-  addStroke(s);
+// ---------------------------------------------------------------- the five actions
+
+// Whatever's held right now, from keys and on-screen buttons together.
+const held = { fwd: new Set(), back: new Set(), left: new Set(), right: new Set() };
+let sent = { move: null, turn: null };
+let lastSentAt = 0;
+
+function currentInput() {
+  return {
+    move: (held.fwd.size ? 1 : 0) - (held.back.size ? 1 : 0),
+    turn: (held.right.size ? 1 : 0) - (held.left.size ? 1 : 0),
+  };
 }
 
-// ---------------------------------------------------------------- rolling
-
-let drawing = null;
-let tempId = -1;
-let lastLive = 0;
-
-function startStroke(sx, sy) {
-  if (!game.round) return toast("round's over — the next one starts soon");
-  if (inkNow() < game.roller) return toast("out of ink — lift off and let it refill");
-  const [x, y] = clampToArena(toArena(sx, sy));
-  drawing = { id: tempId--, author: me.id, team: me.team, tool: "roller", seed: (Math.random() * 0xffffffff) >>> 0, points: [x, y] };
-  redraw(false);
-}
-
-function extendStroke(sx, sy) {
-  const [x, y] = clampToArena(toArena(sx, sy));
-  const p = drawing.points;
-  const d = Math.hypot(x - p[p.length - 2], y - p[p.length - 1]);
-  if (d < 4) return;
-  if (p.length / 2 >= 4000) return endStroke();
-  inkNow();
-  if (tank.ink < d) {
-    endStroke();
-    return toast("out of ink — lift off and let it refill");
-  }
-  tank.ink -= d;
-  p.push(x, y);
-  redraw(false);
-  const now = Date.now();
-  if (now - lastLive > 80) {
-    lastLive = now;
-    sendLive({ cursor: [x, y], partial: liveCopy(drawing) });
-  }
-}
-
-// What others see of a stroke in progress: its tail, if it's grown long.
-function liveCopy(s) {
-  const points = s.points.length > 1600 ? s.points.slice(-1600) : s.points;
-  return { tool: "roller", seed: s.seed, points: points.map((n) => Math.round(n * 10) / 10) };
-}
-
-async function endStroke() {
-  if (!drawing) return;
-  const s = drawing;
-  drawing = null;
-  tank.at = Date.now();
-  addStroke(s);
-  pendingBySeed.set(s.seed, s.id);
-  redraw();
-  sendLive({ done: true });
-  try {
-    const saved = await api("POST", "/api/strokes", { tool: "roller", seed: s.seed, points: s.points.map((n) => Math.round(n * 10) / 10) });
-    if (saved.roundId === game.round?.id) {
-      settle(saved);
-      cells = saved.cells;
-    }
-    tank.ink = Math.min(tank.ink, saved.ink); // the server's tank is the real one
-    redraw();
-  } catch (e) {
-    strokes.delete(s.id);
-    pendingBySeed.delete(s.seed);
-    orderDirty = true;
-    redraw();
-    if (e.data && typeof e.data.ink === "number") tank.ink = e.data.ink;
-    toast(e.status === 429 ? "whoa — slow down a second" : e.message);
-  }
-}
-
-let liveQueued = null, liveInFlight = false;
-function sendLive(body) {
+function sync(force = false) {
   if (!me) return;
-  liveQueued = body;
-  if (liveInFlight) return;
-  liveInFlight = true;
-  const next = liveQueued;
-  liveQueued = null;
-  api("POST", "/api/live", next).catch(() => {}).finally(() => {
-    liveInFlight = false;
-    if (liveQueued) sendLive(liveQueued);
+  const now = currentInput();
+  if (!force && now.move === sent.move && now.turn === sent.turn) return;
+  sent = now;
+  lastSentAt = Date.now();
+  for (const b of document.querySelectorAll("#pad button")) {
+    b.classList.toggle("on", held[b.dataset.act].size > 0);
+  }
+  api("POST", "/api/input", now).catch((e) => {
+    if (e.status !== 429) toast(`lost touch with the floor: ${e.message}`);
   });
 }
 
-// ---------------------------------------------------------------- moving around
+// Staying on the floor while standing still: tell the server we're here.
+setInterval(() => {
+  if (me && !document.hidden && Date.now() - lastSentAt > 4000) sync(true);
+}, 1000);
 
-function zoomAt(sx, sy, factor) {
-  const [wx, wy] = toArena(sx, sy);
-  cam.z = Math.max(0.05, Math.min(4, cam.z * factor));
-  cam.x = wx - (sx - W / 2) / cam.z;
-  cam.y = wy - (sy - H / 2) / cam.z;
-  fitted = false;
-  redraw();
-}
-
-// ---------------------------------------------------------------- pointer input
-
-const pointers = new Map();
-let mode = null; // "paint" | "pan" | "pinch"
-let panFrom = null, pinchFrom = null, spaceDown = false;
-
-canvas.addEventListener("pointerdown", (e) => {
-  canvas.setPointerCapture(e.pointerId);
-  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pointers.size === 2) {
-    if (drawing) { drawing = null; sendLive({ done: true }); redraw(false); } // second finger: a gesture, not paint
-    const [a, b] = [...pointers.values()];
-    mode = "pinch";
-    pinchFrom = { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
-    return;
-  }
-  if (pointers.size > 2) return;
-  if (e.button === 1 || e.button === 2 || spaceDown) {
-    mode = "pan";
-    panFrom = { x: e.clientX, y: e.clientY };
-    canvas.classList.add("panning");
-  } else if (e.button === 0) {
-    if (!me || !game) return toast("still finding you a team — one moment");
-    mode = "paint";
-    startStroke(e.clientX, e.clientY);
-  }
-});
-
-canvas.addEventListener("pointermove", (e) => {
-  const p = pointers.get(e.pointerId);
-  if (p) { p.x = e.clientX; p.y = e.clientY; }
-  if (mode === "pinch" && pointers.size === 2) {
-    const [a, b] = [...pointers.values()];
-    const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    cam.x -= (mx - pinchFrom.mx) / cam.z;
-    cam.y -= (my - pinchFrom.my) / cam.z;
-    zoomAt(mx, my, d / pinchFrom.d);
-    pinchFrom = { d, mx, my };
-  } else if (mode === "pan") {
-    cam.x -= (e.clientX - panFrom.x) / cam.z;
-    cam.y -= (e.clientY - panFrom.y) / cam.z;
-    panFrom = { x: e.clientX, y: e.clientY };
-    fitted = false;
-    redraw();
-  } else if (mode === "paint" && drawing) {
-    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-    for (const c of evs.length ? evs : [e]) {
-      if (!drawing) break;
-      extendStroke(c.clientX, c.clientY);
-    }
-  } else if (!mode && game) {
-    const now = Date.now();
-    if (now - lastLive > 120) {
-      lastLive = now;
-      sendLive({ cursor: toArena(e.clientX, e.clientY) });
-    }
-  }
-});
-
-function pointerEnd(e) {
-  pointers.delete(e.pointerId);
-  if (mode === "paint") endStroke();
-  if (pointers.size === 0) {
-    mode = null;
-    canvas.classList.remove("panning");
-  } else if (mode === "pinch" && pointers.size === 1) {
-    mode = "pan";
-    const [p] = [...pointers.values()];
-    panFrom = { x: p.x, y: p.y };
-  }
-}
-canvas.addEventListener("pointerup", pointerEnd);
-canvas.addEventListener("pointercancel", pointerEnd);
-canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-
-canvas.addEventListener("wheel", (e) => {
-  e.preventDefault();
-  if (e.ctrlKey || e.metaKey) {
-    zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
-  } else {
-    const k = e.deltaMode === 1 ? 20 : 1;
-    cam.x += (e.deltaX * k) / cam.z;
-    cam.y += (e.deltaY * k) / cam.z;
-    fitted = false;
-    redraw();
-  }
-}, { passive: false });
-
+const KEYS = {
+  KeyW: "fwd", ArrowUp: "fwd",
+  KeyS: "back", ArrowDown: "back",
+  KeyA: "left", ArrowLeft: "left",
+  KeyD: "right", ArrowRight: "right",
+};
 window.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement) return;
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.code === "Space") { e.preventDefault(); if (!spaceDown) { spaceDown = true; canvas.classList.add("pan"); } return; }
-  if (e.key === "+" || e.key === "=") return zoomAt(W / 2, H / 2, 1.25);
-  if (e.key === "-") return zoomAt(W / 2, H / 2, 0.8);
-  if (e.key === "0" || e.key === "f") return fit();
+  if (e.key === "+" || e.key === "=") return setZoom(zoomFactor * 1.2);
+  if (e.key === "-") return setZoom(zoomFactor / 1.2);
+  const act = KEYS[e.code];
+  if (!act) return;
+  e.preventDefault();
+  held[act].add(e.code);
+  sync();
 });
 window.addEventListener("keyup", (e) => {
-  if (e.code === "Space") { spaceDown = false; canvas.classList.remove("pan"); }
+  const act = KEYS[e.code];
+  if (!act) return;
+  held[act].delete(e.code);
+  sync();
+});
+// letting go of everything when the tab loses focus, so nobody rolls off forever
+window.addEventListener("blur", () => {
+  for (const s of Object.values(held)) s.clear();
+  sync();
 });
 
-$("#zoomIn").onclick = () => zoomAt(W / 2, H / 2, 1.25);
-$("#zoomOut").onclick = () => zoomAt(W / 2, H / 2, 0.8);
-$("#fit").onclick = fit;
+for (const b of document.querySelectorAll("#pad button")) {
+  const act = b.dataset.act;
+  b.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    b.setPointerCapture(e.pointerId);
+    held[act].add(`p${e.pointerId}`);
+    sync();
+  });
+  const up = (e) => { held[act].delete(`p${e.pointerId}`); sync(); };
+  b.addEventListener("pointerup", up);
+  b.addEventListener("pointercancel", up);
+  b.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+
+function setZoom(f) {
+  zoomFactor = Math.max(0.5, Math.min(2.2, f));
+  store.set("turf.zoom", zoomFactor);
+}
+$("#zoomIn").onclick = () => setZoom(zoomFactor * 1.2);
+$("#zoomOut").onclick = () => setZoom(zoomFactor / 1.2);
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  setZoom(zoomFactor * Math.exp(-e.deltaY * 0.002));
+}, { passive: false });
 
 $("#name").addEventListener("change", async (e) => {
   try {
     const r = await api("PATCH", "/api/me", { name: e.target.value });
     me.name = r.name;
-    names.set(me.id, r.name);
     toast(`you're now “${r.name}”`);
   } catch (err) {
     e.target.value = me.name;
@@ -553,24 +332,27 @@ function toast(msg) {
 async function start() {
   resize();
   window.addEventListener("resize", resize);
+  document.documentElement.style.setProperty("--floor", FLOOR);
+  applyPalette();
   requestAnimationFrame(frame);
   connect();
   try {
     me = await api("POST", "/api/session", { secret: store.get("wall.secret", null) });
     store.set("wall.secret", me.secret);
-    names.set(me.id, me.name);
     $("#name").value = me.name;
+    applyPalette();
+    sync(true); // standing still is an action too: it puts you on the floor
   } catch (e) {
     toast(`couldn't get you a team: ${e.message}`);
   }
   try {
-    await loadRound();
+    await loadState();
   } catch (e) {
-    toast(`couldn't load the arena: ${e.message}`);
+    toast(`couldn't load the floor: ${e.message}`);
   }
-  if (!store.get("turf.welcomed", false)) {
+  if (!store.get("turf.welcomed2", false)) {
     $("#welcome").hidden = false;
-    $("#start").onclick = () => { $("#welcome").hidden = true; store.set("turf.welcomed", true); };
+    $("#start").onclick = () => { $("#welcome").hidden = true; store.set("turf.welcomed2", true); };
   }
 }
 
