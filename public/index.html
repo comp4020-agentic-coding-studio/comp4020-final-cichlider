@@ -3,74 +3,56 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-    <title>The Wall</title>
-    <meta name="description" content="One very large wall. Paint on it, together, live." />
+    <title>Turf War</title>
+    <meta name="description" content="Two teams, one floor, two and a half minutes. Roll your colour over as much of it as you can." />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <canvas id="wall" aria-label="The shared wall. Drag to paint."></canvas>
+    <canvas id="wall" class="paint" aria-label="The arena. Drag to roll paint."></canvas>
 
-    <nav id="tools" aria-label="Tools">
-      <button data-tool="pen" title="Pen (P)" class="on"><span>✎</span><small>pen</small></button>
-      <button data-tool="marker" title="Marker (M)"><span>▮</span><small>marker</small></button>
-      <button data-tool="brush" title="Brush — width follows speed (B)"><span>🖌</span><small>brush</small></button>
-      <button data-tool="spray" title="Spray can (S)"><span>░</span><small>spray</small></button>
-      <button data-tool="line" title="Line (L)"><span>╱</span><small>line</small></button>
-      <button data-tool="rect" title="Rectangle (R)"><span>▭</span><small>rect</small></button>
-      <button data-tool="ellipse" title="Ellipse (O)"><span>◯</span><small>ellipse</small></button>
-      <button data-tool="buff" title="Buff — paint over with wall colour (E)"><span>◌</span><small>buff</small></button>
-      <hr />
-      <button data-tool="hand" title="Move around (H, or hold Space)"><span>✋</span><small>move</small></button>
-      <button data-tool="who" title="Who painted this? (I)"><span>?</span><small>who</small></button>
-      <hr />
-      <button id="undo" title="Take back your last mark (Ctrl/⌘ Z)"><span>↶</span><small>undo</small></button>
-    </nav>
+    <header id="hud" aria-label="Score">
+      <div id="side0" class="side"><b id="pct0">0%</b><small id="name0">Pink</small></div>
+      <div class="gauge" aria-hidden="true"><span id="bar0"></span><span id="bar1"></span></div>
+      <output id="clock">2:30</output>
+      <div id="side1" class="side"><b id="pct1">0%</b><small id="name1">Lime</small></div>
+    </header>
 
-    <section id="paint" aria-label="Paint">
-      <div id="swatches"></div>
-      <label class="custom" title="Any colour"><input type="color" id="color" value="#e63946" /></label>
-      <label class="slider"><span>size <output id="sizeOut">12</output></span><input type="range" id="size" min="1" max="120" value="12" /></label>
-      <label class="slider"><span>opacity <output id="opOut">100</output>%</span><input type="range" id="opacity" min="5" max="100" value="100" /></label>
-      <label class="check" id="fillWrap" title="Fill rectangles and ellipses"><input type="checkbox" id="fill" /> fill</label>
-    </section>
-
-    <section id="nav" aria-label="Get around">
-      <button id="zoomOut" title="Zoom out">−</button>
-      <output id="zoom">100%</output>
-      <button id="zoomIn" title="Zoom in">+</button>
-      <button id="hot" title="Go where people have been painting">🔥 busy spot</button>
-      <button id="blank" title="Find a patch of empty wall">⬚ empty spot</button>
-      <button id="home" title="Back to the middle">⌂</button>
-      <button id="share" title="Copy a link to this spot">🔗 <output id="where">0, 0</output></button>
-    </section>
-
-    <aside id="people" aria-label="Painters">
-      <header>
-        <button id="peopleToggle" aria-expanded="true">painters here <span id="online"></span></button>
-        <a href="/readme/" title="What this is">about</a>
-      </header>
-      <div id="peopleBody">
-        <label class="me">you are <input id="name" maxlength="24" spellcheck="false" /></label>
-        <label class="check"><input type="checkbox" id="solo" /> only show my marks</label>
-        <ul id="painters"></ul>
-        <button id="showAll" hidden>show everyone again</button>
-        <p class="hint">Hiding someone only changes <em>your</em> view. Their marks stay on the wall for everyone else.</p>
+    <section id="me" aria-label="You">
+      <div id="inkWrap" title="Ink: rolling uses it, and it refills on its own">
+        <div id="ink"></div>
       </div>
-    </aside>
+      <div class="who">
+        <span id="teamTag">…</span>
+        <input id="name" maxlength="24" spellcheck="false" aria-label="your tag" />
+      </div>
+      <span id="online"></span>
+      <a href="/readme/" title="What this is">about</a>
+    </section>
 
-    <div id="whoPop" hidden></div>
+    <section id="nav" aria-label="View">
+      <button id="zoomOut" title="Zoom out">−</button>
+      <button id="fit" title="See the whole arena">⤢</button>
+      <button id="zoomIn" title="Zoom in">+</button>
+    </section>
+
+    <div id="result" hidden>
+      <p id="resultTitle"></p>
+      <p id="resultScore"></p>
+      <p id="resultNext"></p>
+    </div>
+
     <div id="toast" role="status" hidden></div>
 
     <div id="welcome" hidden>
-      <h1>The Wall</h1>
-      <p>One very large wall that anyone can paint on. Whoever else is here is painting <em>right now</em> — you'll see their cursors.</p>
+      <h1><span class="t0">Turf</span> <span class="t1">War</span></h1>
+      <p>Two teams, one floor. When the clock runs out, the team whose colour covers more of it wins.</p>
       <ul>
-        <li><b>Paint:</b> drag. Tools on the left, colours below.</li>
-        <li><b>Move:</b> hold <kbd>Space</kbd> and drag, use ✋, two fingers, or scroll. <kbd>Ctrl</kbd>+scroll or pinch to zoom.</li>
-        <li><b>Wander:</b> 🔥 jumps to where people are painting, ⬚ to a fresh patch.</li>
-        <li><b>Too busy?</b> Hide any painter from your own view in the panel on the right.</li>
+        <li><b>Roll:</b> drag across the floor. Your roller paints your team's colour, over anything.</li>
+        <li><b>Ink:</b> rolling drains your tank. Lift off and it refills.</li>
+        <li><b>Look around:</b> hold <kbd>Space</kbd> and drag, two fingers, or scroll. <kbd>Ctrl</kbd>+scroll or pinch to zoom.</li>
       </ul>
-      <button id="start">start painting</button>
+      <p id="welcomeTeam"></p>
+      <button id="start">let's go</button>
     </div>
 
     <script type="module" src="/app.js"></script>
