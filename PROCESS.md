@@ -124,20 +124,106 @@ delete the old wall's paint, I left it, unused. `scripts/seed.ts` is retired:
 rounds wipe the floor on their own, so there's no empty wall to dress up for the
 first visitor.
 
-**Known gap.** The arena is landscape (2400×1400). On a portrait phone it shows
-as a thin strip with a thin roller unless you pinch-zoom. My pod will probably
-play on phones, so that's the first thing to fix after this crit.
+**Known gap (since fixed).** The arena was landscape (2400×1400), which showed
+as a thin strip on a portrait phone. The second pivot below fixed it, because
+the camera now follows your roller.
 
-## Decision record 2: the last roller wins
+## Week 10, second pivot: you are the roller
 
-When two teams paint the same cell, the later stroke (as the server receives
-it) takes it. The options I weighed (first-holds, blending, client
-timestamps) and what this choice costs are in
-[`docs/decisions/0002-last-roller-wins.md`](docs/decisions/0002-last-roller-wins.md).
+**Why again.** I played the round-based version and it was still a drawing
+app with a scoreboard: you dragged across the floor from anywhere, so position
+meant nothing. I changed the rules again, the same week:
+
+- The player *is* a roller, with five actions: forward, back, turn left, turn
+  right, stay.
+- The scene is 2.5D.
+- Rounds are gone.
+- NPCs fill in when there aren't enough people.
+- There are several palettes to pick from, taken from my homepage.
+
+Before any code I settled two ambiguous points. First, "pick a palette" means
+picking one of the homepage's light/dark *pairs* for your own screen, so there
+are still two teams. Second, without rounds, something has to stop the floor
+filling up and freezing: paint now fades if nobody renews it.
+
+**Directing the agent.** This rewrite turned the architecture over, so I had
+Claude Code lay out the design before changing anything:
+
+- The server simulates every roller at 20 Hz and streams positions and changed
+  cells at 10 Hz.
+- Clients send only their current action.
+- NPCs use the same five actions through the same physics.
+- Paint fades by a *game clock* that stops when nobody is on the floor. Without
+  that, fading and "still there when you come back" contradict each other,
+  because the Fly machine sleeps when nobody's connected. That became
+  decision record 3.
+
+The ink tank went too: with no "lift off" action, there's nothing for it to
+pace. The whole change is
+[`9986c54`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/9986c54).
+
+**Grounding.** `pnpm check` passes with 24 tests:
+
+- the course's 2;
+- 7 in `spec/grid.test.ts` (ownership, fading, change reporting, save/restore);
+- 6 in the new `spec/world.test.ts`, which drives the pure simulation directly:
+  each action's effect, walls, collisions, NPCs topping up and stepping aside,
+  and NPCs actually painting;
+- 9 in `spec/turf.test.ts` against the running server, including a roller's
+  move reaching another session's stream within a second.
+
+I looped the server spec 40 times while the floor's paint aged past the fade
+time, with no failures. By hand:
+
+- With nobody on the floor, the game clock read the same 3 s apart (frozen).
+- After a restart, the clock and the score came back identical.
+
+I drove the game in a real headless Chrome over the DevTools protocol (dismiss
+the welcome, hold W, then D) at 1280×800 and 390×844. The server's state
+confirmed the roller moved and painted, and the screenshots confirmed the
+isometric floor, the rollers, the bots and the palette picker. Because the
+camera now follows your roller, the portrait-phone gap from the first pivot is
+gone.
+
+**Corrections along the way.**
+- The server wouldn't start: node's type stripping can't run TypeScript
+  parameter properties, and `tsc` hadn't complained. I fixed the class and
+  turned on `erasableSyntaxOnly`, so `pnpm typecheck` now catches this before
+  boot.
+- A test asserted that bots are always present. After repeated runs, enough
+  human test players were still on the floor that the bots had correctly
+  stepped aside. The test now checks the real invariant: bots = max(0, 3 −
+  people) per team.
+- The snapshot test caught a real inconsistency. Fading ran once a second, so
+  a cell could be reported up to a second past its fade time. Fading now runs
+  every tick.
+- The first screenshots showed rollers as thin sticks, and as tall slivers when
+  they faced the camera. I enlarged them and replaced the fake drum (a thick
+  line with fixed end ellipses) with a projected cylinder: two upright end
+  circles, joined by their outline.
+
+**Kept, deliberately.** The `paint` and `rounds` tables from earlier in the
+week sit on the volume next to the wall's `strokes`, untouched. The floor is
+now one row in a `floor` table.
+
+## Decision record 2: the later roller wins
+
+When two teams roll over the same cell, the later roller (in the server's
+tick order) takes it. The options I weighed (first-holds, blending, letting
+clients paint) and what this choice costs are in
+[`docs/decisions/0002-last-roller-wins.md`](docs/decisions/0002-last-roller-wins.md),
+revised for the roller version.
+
+## Decision record 3: the world freezes when empty
+
+Paint fades by a game clock that only runs while someone is on the floor, so
+the floor is still there when people come back, even after the machine has
+slept. See
+[`docs/decisions/0003-the-world-freezes-when-empty.md`](docs/decisions/0003-the-world-freezes-when-empty.md).
 
 ## Where good is checked
 
-See the table in `README.md`. The enforced claims live in `spec/grid.test.ts`
-and `spec/turf.test.ts`; round timing across a restart is checked by hand as
-above. What's judged — is it close until the end, does painting over them feel
-good — gets judged by my pod playing against each other at the crit.
+See the table in `README.md`. The enforced claims live in `spec/grid.test.ts`,
+`spec/world.test.ts` and `spec/turf.test.ts`. The freeze and restart are
+checked by hand as above. What's judged (is the floor always changing, can you
+feel yourself changing it) gets judged by my pod playing it at the crit.
