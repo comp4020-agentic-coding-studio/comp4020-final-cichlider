@@ -1,8 +1,10 @@
 # Turf War
 
-You're a paint roller. Two teams share one floor, seen from above at an angle.
+You're a paint roller. Two teams share one upright wall, seen almost face on.
 Wherever you roll turns your team's colour, including over the other team's
-paint. Paint nobody rolls over again slowly fades back to bare floor, so the
+paint, and because the wall is upright, wet paint now and then runs down in
+drips that claim a thin line as they go. Paint nobody rolls over again slowly
+fades back to bare wall, so the
 map never fills up and stays that way: you keep your turf fresh, and you take
 theirs. There are no rounds and no clock. You drop in, roll for as long as you
 like, and leave. When there aren't enough people, bots roll alongside you and
@@ -69,6 +71,7 @@ tell who's winning or why. Good, for this game, means:
 | Another open session sees your roller move within a second | enforced: `spec/turf.test.ts` times it over the live event stream |
 | The later roller over a cell owns it; cells are never counted twice | enforced: `spec/grid.test.ts` (the rule) and `spec/turf.test.ts` (end to end) |
 | Paint fades after 75 s unless renewed, and nothing is shown past its fade | enforced: `spec/grid.test.ts`, `spec/turf.test.ts` |
+| Drips run straight down from a moving roller, paint (and score) a thin line, and stop | enforced: `spec/world.test.ts` |
 | Bots fill each team to three, and only to three | enforced: `spec/world.test.ts`, `spec/turf.test.ts` |
 | The world freezes when empty, and the floor survives a restart | `spec/grid.test.ts` checks a saved floor loads back exactly; the freeze and the restart are checked by hand (see `PROCESS.md`), since the spec can't stop the server |
 | The floor is always changing, and you can feel yourself changing it | **judged**: by watching my crit pod play it |
@@ -98,7 +101,8 @@ A single Node 24 process (TypeScript, run directly, no build step) runs the
 world at 20 ticks a second. It moves every roller according to its current
 action, has the bots choose theirs, and stamps paint into a grid of 20-unit
 cells. Ten times a second it sends everyone the rollers' positions and the
-cells that changed, over server-sent events. Clients send only which of the
-five actions they're doing. The browser draws the grid as an isometric floor on
-a plain canvas. The floor and the game clock are saved to SQLite on the Fly
+cells that changed, plus where each drip is, over server-sent events. Clients
+send only which of the five actions they're doing. The browser turns the grid
+of 10-unit cells into smooth vector outlines (marching squares), so the paint
+stays sharp at any zoom and sits exactly on the cells that are scored. The floor and the game clock are saved to SQLite on the Fly
 volume every few seconds. `PROCESS.md` has the reasons.

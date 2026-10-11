@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ARENA, Turf } from "../server/grid.ts";
+import { ARENA, CELL, COLS, Turf } from "../server/grid.ts";
 import { MIN_PER_TEAM, RADIUS, SPEED, World } from "../server/world.ts";
 
 // Rollers on their own, without a server: the five actions, the walls, and
@@ -68,6 +68,35 @@ describe("the five actions", () => {
   });
 });
 
+describe("the wall is upright, so paint runs", () => {
+  it("lets drips go from a moving roller, which run straight down, paint as they go, and stop", () => {
+    const w = new World(new Turf(), seeded(3));
+    const r = w.spawn("a", 0, "a", false, 0);
+    Object.assign(r, { x: -600, y: -400, h: 0 });
+    w.setInput("a", 1, 0, 0);
+    let now = 0, most = 0;
+    for (let i = 0; i < 80; i++) {
+      now += 50;
+      w.step(0.05, now);
+      most = Math.max(most, w.drips.length);
+    }
+    expect(most, "a roller driving for 4 s should let some drips go").toBeGreaterThan(0);
+    w.setInput("a", 0, 0, now);
+    run(w, 5, now);
+    expect(w.drips.length, "drips dry up once they've run their length").toBe(0);
+    // below the band the roller painted (y -432..-368), the only paint is thin drip lines
+    const below = (y: number) => {
+      const row = Math.floor((y - ARENA.y0) / CELL);
+      let n = 0;
+      for (let col = 0; col < COLS; col++) if (w.turf.cells[row * COLS + col] === 1) n++;
+      return n;
+    };
+    expect(below(-330), "drip lines run below the roller's stripe").toBeGreaterThan(0);
+    expect(below(-330), "and they're thin lines, not a second stripe").toBeLessThan(COLS * 0.3);
+    expect(below(-150), "nothing runs further than a drip can (lowest start -352, longest run 190)").toBe(0);
+  });
+});
+
 describe("NPCs", () => {
   it("fill each team up to the minimum, and step out as people join", () => {
     const w = new World(new Turf(), seeded());
@@ -90,7 +119,7 @@ describe("NPCs", () => {
     w.reconcileNpcs(0);
     run(w, 20);
     // in 20 seconds, both sides' bots have each claimed a real share of the floor
-    const total = (ARENA.x1 - ARENA.x0) * (ARENA.y1 - ARENA.y0) / 400;
+    const total = ((ARENA.x1 - ARENA.x0) * (ARENA.y1 - ARENA.y0)) / (CELL * CELL);
     expect(w.turf.counts[0] / total).toBeGreaterThan(0.08);
     expect(w.turf.counts[1] / total).toBeGreaterThan(0.08);
   });

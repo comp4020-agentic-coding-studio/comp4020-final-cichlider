@@ -1,12 +1,13 @@
 import { PALETTES } from "./palettes.js";
-import { FLOOR, drawRoller, drawSlab, drawTag, drawTiles, makeView, paintFloor } from "./render.js";
+import { WALL, drawDrip, drawEdge, drawPaint, drawRoller, drawTag, drawWall, makeView, paintPaths, shade } from "./render.js";
 
 const $ = (s) => document.querySelector(s);
 const canvas = $("#wall");
 const ctx = canvas.getContext("2d");
-const floorCanvas = document.createElement("canvas"); // one pixel per cell
-const fctx = floorCanvas.getContext("2d");
-let floorImg = null;
+const mini = $("#mini");
+const mctx = mini.getContext("2d");
+const miniSrc = document.createElement("canvas"); // one pixel per cell, for the minimap
+const msctx = miniSrc.getContext("2d");
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
@@ -16,7 +17,7 @@ const store = {
 // ---------------------------------------------------------------- state
 
 let W = 0, H = 0, dpr = 1;
-const cam = { x: 0, y: 0, z: 0.5 }; // arena point at screen centre, and zoom
+const cam = { x: 0, y: 0, z: 0.6 }; // wall point at screen centre, and zoom
 let zoomFactor = store.get("turf.zoom", 1);
 let me = null;
 let game = null; // the fixed facts from /api/state: arena, cell size, roller width, fade time
@@ -24,7 +25,10 @@ let cells = null; // owner per cell: 0 bare, 1 team 0, 2 team 1
 let painted = null; // game-clock ms each cell was last painted
 let gameNow = 0;
 let score = [0, 0];
-let floorDirty = true;
+let paths = null; // paint shapes, rebuilt when the paint changes
+let pathsAt = -Infinity;
+let pathsDirty = true;
+let drips = [];
 const rollers = new Map(); // id -> { team, npc, name, move, x, y, h (shown), tx, ty, th (latest from server) }
 let palette = PALETTES.find((p) => p.id === store.get("turf.palette", "default")) ?? PALETTES[0];
 
@@ -34,20 +38,20 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 // ---------------------------------------------------------------- drawing
 
 function resize() {
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  dpr = Math.min(window.devicePixelRatio || 1, 3);
   W = window.innerWidth;
   H = window.innerHeight;
   canvas.width = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
 }
 
-// Close enough to see the roller and what's around it; phones get a bit
-// further out so there's room to plan a route.
-const baseZoom = () => Math.max(0.4, Math.min(1, Math.max(W, H) / 1250));
+// Close enough to see your roller and the paint around it.
+const baseZoom = () => Math.max(0.45, Math.min(1.1, Math.max(W, H) / 1300));
 
 function render(dt) {
+  const dark = colorOf(1);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--void").trim() || "#120e24";
+  ctx.fillStyle = shade(dark, -0.72);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!game) return;
 
@@ -61,76 +65,127 @@ function render(dt) {
 
   // the camera follows you
   const mine = me && rollers.get(me.id);
-  const fx = mine ? mine.x : 0, fy = mine ? mine.y : 0;
-  cam.x += (fx - cam.x) * Math.min(1, dt * 5);
-  cam.y += (fy - cam.y) * Math.min(1, dt * 5);
+  if (mine) {
+    cam.x += (mine.x - cam.x) * Math.min(1, dt * 5);
+    cam.y += (mine.y - cam.y) * Math.min(1, dt * 5);
+  }
   cam.z = baseZoom() * zoomFactor;
   const v = makeView(cam, W, H);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
   const a = game.arena;
-  drawSlab(ctx, v, a, palette.teams[1].color);
 
-  if (floorDirty) {
-    paintFloor(floorImg, cells, painted, gameNow, game.fadeMs, palette.teams.map((t) => t.color));
-    fctx.putImageData(floorImg, 0, 0);
-    floorDirty = false;
-  }
+  // the wall and its paint, in wall coordinates
   ctx.setTransform(...v.plane(dpr));
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(floorCanvas, a.x0, a.y0, a.x1 - a.x0, a.y1 - a.y0);
-  drawTiles(ctx, a, game.cell * 5, v.k);
+  drawWall(ctx, a, v.k);
+  if ((pathsDirty && gameNow - pathsAt > 120) || gameNow - pathsAt > 500) {
+    paths = paintPaths(cells, painted, gameNow, game);
+    pathsAt = gameNow;
+    pathsDirty = false;
+  }
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(a.x0, a.y0, a.x1 - a.x0, a.y1 - a.y0);
+  ctx.clip();
+  drawPaint(ctx, paths, palette.teams.map((t) => t.color));
+  ctx.restore();
 
-  // rollers, back to front
+  // everything standing out from the wall, in screen pixels
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const list = [...rollers.entries()].sort(([, p], [, q]) => p.x + p.y - (q.x + q.y));
+  drawEdge(ctx, v, a, shade(dark, -0.45));
+  for (const d of drips) drawDrip(ctx, v, d, colorOf(d[2]));
+  const list = [...rollers.entries()].sort(([, p], [, q]) => p.y - q.y);
   for (const [id, r] of list) drawRoller(ctx, v, r, colorOf(r.team), game.roller, me && id === me.id);
   for (const [id, r] of list) {
     const isMe = me && id === me.id;
-    drawTag(ctx, v, r, isMe ? `${r.name} (you)` : r.npc ? `🤖 ${r.name}` : r.name, isMe ? "#ffffff" : colorOf(r.team), isMe);
+    const label = isMe ? `${r.name} · you` : r.npc ? `bot · ${r.name.replace(/^bot-/, "")}` : r.name;
+    drawTag(ctx, v, r, label, isMe ? "#ffffff" : shade(colorOf(1), -0.55), isMe ? "#111" : shade(colorOf(r.team), r.team === 1 ? 0.55 : 0));
   }
 }
 
-let last = performance.now();
+let last = performance.now(), lastMini = 0;
 function frame(t) {
   const dt = Math.min(0.1, (t - last) / 1000);
   last = t;
   render(dt);
+  if (t - lastMini > 200) { minimap(); lastMini = t; }
   requestAnimationFrame(frame);
 }
 
+// The whole wall in the corner: paint, every roller, and the part you're seeing.
+function minimap() {
+  if (!game) return;
+  const img = msctx.createImageData(game.cols, game.rows);
+  const wall = hex(WALL), team = [hex(colorOf(0)), hex(colorOf(1))];
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i] ? team[cells[i] - 1] : wall;
+    img.data.set([c[0], c[1], c[2], 255], i * 4);
+  }
+  msctx.putImageData(img, 0, 0);
+  const mw = mini.width, mh = mini.height;
+  mctx.imageSmoothingEnabled = false;
+  mctx.drawImage(miniSrc, 0, 0, mw, mh);
+  const a = game.arena;
+  const sx = mw / (a.x1 - a.x0), sy = mh / (a.y1 - a.y0);
+  for (const [id, r] of rollers) {
+    const isMe = me && id === me.id;
+    mctx.fillStyle = isMe ? "#ffffff" : colorOf(r.team);
+    mctx.strokeStyle = isMe ? "#000" : shade(colorOf(1), -0.6);
+    mctx.lineWidth = 2;
+    mctx.beginPath();
+    mctx.arc((r.x - a.x0) * sx, (r.y - a.y0) * sy, isMe ? 6 : 4.5, 0, Math.PI * 2);
+    mctx.fill();
+    mctx.stroke();
+  }
+  const view = makeView(cam, W, H).visible(a);
+  mctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  mctx.lineWidth = 2;
+  mctx.strokeRect((view.x0 - a.x0) * sx, (view.y0 - a.y0) * sy, (view.x1 - view.x0) * sx, (view.y1 - view.y0) * sy);
+}
+const hex = (h) => {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+
 // ---------------------------------------------------------------- the HUD
 
+let hudKey = "";
 function hud() {
   if (!game) return;
+  const pct = score.map((n) => (100 * n) / game.total);
+  let humans = 0, bots = 0;
+  for (const r of rollers.values()) r.npc ? bots++ : humans++;
+  const key = `${pct.map((p) => p.toFixed(1))}|${humans}|${bots}|${palette.id}|${me?.team}`;
+  if (key === hudKey) return;
+  hudKey = key;
   for (const t of [0, 1]) {
-    const pct = (100 * score[t]) / game.total;
-    $(`#pct${t}`).textContent = `${pct.toFixed(1)}%`;
-    $(`#bar${t}`).style.width = `${pct}%`;
+    $(`#pct${t}`).textContent = `${pct[t].toFixed(1)}%`;
+    $(`#bar${t}`).style.width = `${pct[t]}%`;
     $(`#name${t}`).textContent = palette.teams[t].name;
+    $(`#side${t}`).classList.toggle("mine", me?.team === t);
   }
-  let humans = 0, npcs = 0;
-  for (const r of rollers.values()) r.npc ? npcs++ : humans++;
-  $("#online").textContent = `${humans} ${humans === 1 ? "player" : "players"}${npcs ? ` · ${npcs} bots` : ""}`;
+  const lead = pct[0] === pct[1] ? "level" : `${palette.teams[pct[0] > pct[1] ? 0 : 1].name} leads by ${Math.abs(pct[0] - pct[1]).toFixed(1)}`;
+  $("#lead").textContent = lead;
+  $("#online").textContent = `${humans} ${humans === 1 ? "player" : "players"}${bots ? ` + ${bots} bots` : ""}`;
 }
 
 function applyPalette() {
   const root = document.documentElement.style;
-  root.setProperty("--team-0", palette.teams[0].color);
-  root.setProperty("--team-1", palette.teams[1].color);
-  root.setProperty("--light", palette.teams[0].color);
-  root.setProperty("--dark", palette.teams[1].color);
+  root.setProperty("--light", colorOf(0));
+  root.setProperty("--dark", colorOf(1));
+  root.setProperty("--deep", shade(colorOf(1), -0.55));
+  root.setProperty("--void", shade(colorOf(1), -0.72));
+  root.setProperty("--wall", WALL);
   if (me) {
     root.setProperty("--mine", colorOf(me.team));
-    $("#teamTag").textContent = `Team ${palette.teams[me.team].name}`;
+    $("#teamTag").textContent = palette.teams[me.team].name;
+    $("#teamDot").className = `dot t${me.team}`;
     const b = document.createElement("b");
+    b.className = `t${me.team}`;
     b.textContent = `Team ${palette.teams[me.team].name}`;
-    b.style.color = colorOf(me.team);
     $("#welcomeTeam").replaceChildren("You're on ", b, ".");
   }
-  for (const sw of document.querySelectorAll(".pal")) sw.classList.toggle("on", sw.dataset.id === palette.id);
-  floorDirty = true;
+  for (const sw of document.querySelectorAll(".pal")) sw.setAttribute("aria-pressed", String(sw.dataset.id === palette.id));
+  document.querySelector('meta[name="theme-color"]').content = shade(colorOf(1), -0.72);
+  hudKey = "";
   hud();
 }
 
@@ -139,8 +194,9 @@ for (const p of PALETTES) {
   b.className = "pal";
   b.dataset.id = p.id;
   b.title = `${p.teams[0].name} / ${p.teams[1].name}`;
-  b.setAttribute("aria-label", `${p.teams[0].name} and ${p.teams[1].name} colours`);
-  b.style.background = `linear-gradient(135deg, ${p.teams[0].color} 50%, ${p.teams[1].color} 50%)`;
+  b.setAttribute("aria-label", `${p.teams[0].name} and ${p.teams[1].name}`);
+  b.style.setProperty("--a", p.teams[0].color);
+  b.style.setProperty("--b", p.teams[1].color);
   b.onclick = () => {
     palette = p;
     store.set("turf.palette", p.id);
@@ -173,28 +229,27 @@ function applyRollers(list, snap) {
   for (const id of rollers.keys()) if (!seen.has(id)) rollers.delete(id);
 }
 
+const unbase64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
 async function loadState() {
   const s = await api("GET", "/api/state");
   game = s;
-  cells = new Uint8Array(s.cols * s.rows);
-  painted = new Float64Array(s.cols * s.rows);
-  for (let i = 0; i < s.cells.length; i += 3) {
-    cells[s.cells[i]] = s.cells[i + 1];
-    painted[s.cells[i]] = s.t - s.cells[i + 2];
-  }
-  floorCanvas.width = s.cols;
-  floorCanvas.height = s.rows;
-  floorImg = fctx.createImageData(s.cols, s.rows);
+  cells = unbase64(s.owners);
+  const ages = new Uint16Array(unbase64(s.ages).buffer);
+  painted = new Float64Array(cells.length);
+  for (let i = 0; i < cells.length; i++) painted[i] = s.t - ages[i] * 100;
+  miniSrc.width = s.cols;
+  miniSrc.height = s.rows;
   gameNow = s.t;
   score = s.s;
+  drips = s.drips;
   applyRollers(s.rollers, true);
   const mine = me && rollers.get(me.id);
   if (mine) { cam.x = mine.x; cam.y = mine.y; }
-  floorDirty = true;
+  pathsDirty = true;
   hud();
 }
 
-let lastFloorPaint = 0;
 function connect() {
   let first = true;
   const es = new EventSource("/api/events");
@@ -210,12 +265,9 @@ function connect() {
       cells[m.c[i]] = m.c[i + 1];
       painted[m.c[i]] = m.t;
     }
-    // new paint shows at once; ageing paint only needs a refresh now and then
-    if (m.c.length || m.t - lastFloorPaint > 500) {
-      floorDirty = true;
-      lastFloorPaint = m.t;
-    }
+    if (m.c.length) pathsDirty = true;
     score = m.s;
+    drips = m.d ?? [];
     applyRollers(m.r, false);
     hud();
   };
@@ -238,18 +290,16 @@ function currentInput() {
 function sync(force = false) {
   if (!me) return;
   const now = currentInput();
+  for (const el of document.querySelectorAll("[data-act]")) el.classList.toggle("on", held[el.dataset.act].size > 0);
   if (!force && now.move === sent.move && now.turn === sent.turn) return;
   sent = now;
   lastSentAt = Date.now();
-  for (const b of document.querySelectorAll("#pad button")) {
-    b.classList.toggle("on", held[b.dataset.act].size > 0);
-  }
   api("POST", "/api/input", now).catch((e) => {
-    if (e.status !== 429) toast(`lost touch with the floor: ${e.message}`);
+    if (e.status !== 429) toast(`lost touch with the wall: ${e.message}`);
   });
 }
 
-// Staying on the floor while standing still: tell the server we're here.
+// Staying on the wall while standing still: tell the server we're here.
 setInterval(() => {
   if (me && !document.hidden && Date.now() - lastSentAt > 4000) sync(true);
 }, 1000);
@@ -276,7 +326,7 @@ window.addEventListener("keyup", (e) => {
   held[act].delete(e.code);
   sync();
 });
-// letting go of everything when the tab loses focus, so nobody rolls off forever
+// let go of everything when the tab loses focus, so nobody rolls off forever
 window.addEventListener("blur", () => {
   for (const s of Object.values(held)) s.clear();
   sync();
@@ -332,7 +382,6 @@ function toast(msg) {
 async function start() {
   resize();
   window.addEventListener("resize", resize);
-  document.documentElement.style.setProperty("--floor", FLOOR);
   applyPalette();
   requestAnimationFrame(frame);
   connect();
@@ -341,18 +390,18 @@ async function start() {
     store.set("wall.secret", me.secret);
     $("#name").value = me.name;
     applyPalette();
-    sync(true); // standing still is an action too: it puts you on the floor
+    sync(true); // standing still is an action too: it puts you on the wall
   } catch (e) {
     toast(`couldn't get you a team: ${e.message}`);
   }
   try {
     await loadState();
   } catch (e) {
-    toast(`couldn't load the floor: ${e.message}`);
+    toast(`couldn't load the wall: ${e.message}`);
   }
-  if (!store.get("turf.welcomed2", false)) {
+  if (!store.get("turf.welcomed3", false)) {
     $("#welcome").hidden = false;
-    $("#start").onclick = () => { $("#welcome").hidden = true; store.set("turf.welcomed2", true); };
+    $("#start").onclick = () => { $("#welcome").hidden = true; store.set("turf.welcomed3", true); };
   }
 }
 

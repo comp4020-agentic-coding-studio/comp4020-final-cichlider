@@ -116,13 +116,18 @@ describe("the floor is shared, live", { timeout: 10_000 }, () => {
 
   it("sends a snapshot that agrees with its own score", async () => {
     const s = (await call("GET", "/api/state")).data;
+    const owners = Buffer.from(s.owners, "base64");
+    const raw = Buffer.from(s.ages, "base64");
+    const ages = new Uint16Array(raw.buffer, raw.byteOffset, raw.byteLength / 2);
+    expect(owners.length).toBe(s.total);
+    expect(ages.length).toBe(s.total);
     const tally = [0, 0];
-    for (let i = 1; i < s.cells.length; i += 3) tally[s.cells[i] - 1]++;
-    expect(tally).toEqual(s.s);
-    for (let i = 2; i < s.cells.length; i += 3) {
-      expect(s.cells[i]).toBeGreaterThanOrEqual(0);
-      expect(s.cells[i]).toBeLessThan(s.fadeMs);
+    for (let i = 0; i < owners.length; i++) {
+      if (!owners[i]) continue;
+      tally[owners[i] - 1]++;
+      expect(ages[i] * 100, "no paint is shown past its fade time").toBeLessThan(s.fadeMs + 100);
     }
+    expect(tally).toEqual(s.s);
   });
 });
 

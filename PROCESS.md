@@ -206,6 +206,43 @@ gone.
 week sit on the volume next to the wall's `strokes`, untouched. The floor is
 now one row in a `floor` table.
 
+## Week 10, third pass: a wall, not a floor
+
+**What I asked for.** The isometric view was tilted much further than I'd
+meant, the paint was blurry, and the scene should be a wall, which is upright,
+so paint should run. I asked for a near face-on view, sharper rendering,
+dripping paint, and a better UI.
+
+**What changed.**
+- The view is now almost face on. The wall is foreshortened only slightly, and
+  rollers and the wall's bottom edge stand out a little, which keeps the 2.5D
+  feel.
+- Blurriness had a concrete cause: the paint was an 80×50 image stretched to
+  fill the screen. Cells are now 10 units (160×100), and the client turns them
+  into vector outlines with marching squares, filled as one path per team so
+  there are no seams. It's sharp at any zoom and still exactly the scored cells.
+- Drips are simulated on the server and are part of the score. A drip drawn
+  only in the browser would make what you see disagree with what counts,
+  breaking the README's "the floor is the scoreboard".
+- The UI follows my homepage's two-colour language: a score bar, a minimap, a
+  player card, a key hint on desktop, and the touch pad only on touch screens.
+
+**Grounding.** `pnpm check` passes, 25 tests, including a new one: a moving
+roller lets drips go, they run straight down, paint a thin line, and stop
+within their maximum length. I drove the game in headless Chrome at 2× pixel
+density, on desktop and on a touch-emulated phone, and checked the screenshots.
+
+**Corrections along the way.**
+- The first face-on attempt drew each row of paint as a rounded bar, so edges
+  looked like stacks of beads. Marching squares replaced it.
+- One automated drive showed no player on the server. The driver had clicked
+  "let's roll" before the page had a session, and the page had been waiting on
+  a Google Fonts request. The driver now waits for the session, and the page
+  uses system fonts, so the game doesn't depend on a third-party request.
+- The dark team's score, drawn in its own deep colour, was hard to read on the
+  dark panel. Both scores are now in the light colour, with the team dot
+  marking which is which.
+
 ## Decision record 2: the later roller wins
 
 When two teams roll over the same cell, the later roller (in the server's

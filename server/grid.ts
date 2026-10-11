@@ -1,15 +1,15 @@
-// Who owns which bit of the arena. The arena is cut into square cells; a cell
+// Who owns which bit of the wall. The wall is cut into square cells; a cell
 // belongs to whichever team's roller passed over it last, and fades back to bare
 // floor if nobody rolls over it again for FADE_MS. Nothing blends and nothing is
 // locked. Time here is the game clock (see server/main.ts), not the wall clock.
 // Pure, no I/O, so the server and the spec share it.
 
 export const ARENA = { x0: -800, y0: -500, x1: 800, y1: 500 } as const;
-export const CELL = 20;
+export const CELL = 10;
 export const COLS = (ARENA.x1 - ARENA.x0) / CELL;
 export const ROWS = (ARENA.y1 - ARENA.y0) / CELL;
 export const TOTAL = COLS * ROWS;
-export const ROLLER = 64; // width of the band a roller paints, in arena units
+export const ROLLER = 64; // width of the band a roller paints, in wall units
 export const FADE_MS = 75_000;
 
 export type Team = 0 | 1;

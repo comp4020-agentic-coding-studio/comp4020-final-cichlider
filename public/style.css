@@ -1,104 +1,154 @@
+/* Two colours, like the homepage: --light is team 0, --dark is team 1, and the
+   interface is drawn in them. app.js sets all of these from the chosen palette. */
 :root {
-  /* set from the chosen palette in app.js; these are the homepage's default pair */
   --light: #ffe600;
   --dark: #4123d9;
-  --team-0: var(--light);
-  --team-1: var(--dark);
+  --deep: #1d1061; /* --dark, much darker: panels */
+  --void: #120b3d; /* darker still: around the wall */
+  --wall: #dcd9e2;
   --mine: var(--light);
-  --void: #120e24;
-  --ink: #0e0a1c;
-  --panel: rgba(18, 14, 36, 0.9);
-  --panel-ink: #f4f0ff;
-  --muted: #a69cc8;
-  --radius: 14px;
+  --r: 16px;
+  --line: 2.5px;
   color-scheme: dark;
-  font: 14px/1.4 ui-rounded, "SF Pro Rounded", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 500 14px/1.35 ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: var(--void); color: var(--panel-ink); }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--void); color: var(--light); }
 button, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
+small { font-size: 11px; }
 
 #wall { position: fixed; inset: 0; width: 100vw; height: 100vh; touch-action: none; display: block; }
 
-#hud, #me, #nav, #toast, #welcome {
+.panel, #hud, #map, #me, #keys, #toast, #welcome {
   position: fixed;
-  background: var(--panel);
-  color: var(--panel-ink);
-  border: 3px solid var(--ink);
-  border-radius: var(--radius);
-  box-shadow: 0 5px 0 var(--ink);
+  background: var(--deep);
+  color: var(--light);
+  border: var(--line) solid var(--light);
+  border-radius: var(--r);
+  box-shadow: 4px 4px 0 var(--light);
 }
+
+/* a team's colour as a dot: the dark team gets a light rim so it reads on the panel */
+.dot { width: 16px; height: 16px; border-radius: 50%; flex: none; border: 2px solid var(--light); }
+.dot.t0 { background: var(--light); }
+.dot.t1 { background: var(--dark); }
+.t0 { color: var(--light); }
+.t1 { color: var(--dark); -webkit-text-stroke: 0.6px var(--light); paint-order: stroke fill; }
 
 /* ---- score (top centre) */
 #hud {
-  left: 50%; top: 10px; transform: translateX(-50%);
-  width: min(520px, calc(100vw - 20px));
-  padding: 6px 10px; display: flex; align-items: center; gap: 10px;
+  left: 50%; top: max(12px, env(safe-area-inset-top)); transform: translateX(-50%);
+  width: min(560px, calc(100vw - 24px));
+  padding: 8px 12px; display: flex; align-items: center; gap: 12px;
 }
-.side { display: flex; flex-direction: column; align-items: center; line-height: 1; min-width: 64px; }
-.side b { font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }
-.side small { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 3px; }
-#side0 b, #side0 small { color: var(--team-0); }
-/* the dark team's colour can be too deep to read on the panel, so it gets a light rim */
-#side1 b, #side1 small { color: var(--team-1); text-shadow: 0 0 1px #fff, 0 0 2px #fff, 0 0 3px #fff; }
+.side { display: flex; align-items: center; gap: 8px; line-height: 1; }
+.side > div { display: flex; flex-direction: column; gap: 3px; }
+#side1 > div { align-items: flex-end; }
+.side b { font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.side small { font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; }
+.side.mine small::after { content: " · you"; }
+.track { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
 .gauge {
-  flex: 1; height: 16px; border-radius: 999px; background: #8f8a9f; border: 2px solid var(--ink);
+  width: 100%; height: 14px; border-radius: 999px; background: var(--wall); border: var(--line) solid var(--light);
   display: flex; justify-content: space-between; overflow: hidden;
 }
-.gauge span { display: block; height: 100%; transition: width 0.3s ease-out; }
-#bar0 { background: var(--team-0); }
-#bar1 { background: var(--team-1); }
+.gauge span { display: block; height: 100%; transition: width 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+#bar0 { background: var(--light); }
+#bar1 { background: var(--dark); }
+#lead { font-weight: 700; opacity: 0.75; white-space: nowrap; }
+
+/* ---- map (top right) */
+#map { right: 12px; top: max(12px, env(safe-area-inset-top)); padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+#mini { width: 176px; height: 110px; border-radius: 10px; display: block; background: var(--wall); }
+.zoom { display: flex; gap: 6px; justify-content: flex-end; }
+.zoom button {
+  width: 30px; height: 26px; border-radius: 8px; border: 2px solid var(--light); background: transparent;
+  font-weight: 900; line-height: 1;
+}
+.zoom button:hover { background: var(--light); color: var(--deep); }
 
 /* ---- you (bottom left) */
-#me { left: 12px; bottom: 12px; padding: 8px 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; max-width: calc(100vw - 260px); }
-.who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-#teamTag { font-weight: 900; font-size: 15px; color: var(--mine); text-transform: uppercase; letter-spacing: 0.04em; text-shadow: 0 0 2px var(--ink); }
-.who input { background: #2a2145; border: 2px solid var(--ink); border-radius: 8px; padding: 2px 6px; width: 140px; max-width: 100%; }
-#palettes { display: flex; gap: 6px; }
-.pal { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--ink); padding: 0; flex: none; }
-.pal.on { box-shadow: 0 0 0 2px var(--panel-ink); }
-#online { color: var(--muted); font-size: 12px; white-space: nowrap; }
-#me a { color: var(--muted); font-size: 12px; }
+#me {
+  left: 12px; bottom: max(12px, env(safe-area-inset-bottom));
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; width: 230px;
+}
+#me .row { display: flex; align-items: center; gap: 10px; }
+#me #teamDot { width: 26px; height: 26px; }
+.who { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.who small { text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; opacity: 0.85; }
+.who input {
+  background: transparent; border: 0; border-bottom: 2px solid var(--light); padding: 1px 0;
+  font-weight: 800; font-size: 16px; width: 100%; outline: none;
+}
+.label { text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; opacity: 0.85; width: 56px; }
+#palettes { display: flex; gap: 8px; }
+.pal {
+  width: 28px; height: 28px; border-radius: 50%; padding: 0; flex: none; border: 2px solid var(--light);
+  background: linear-gradient(135deg, var(--a) 50%, var(--b) 50%);
+}
+.pal[aria-pressed="true"] { outline: 2px solid var(--light); outline-offset: 2px; }
+.foot { justify-content: space-between; font-size: 12px; opacity: 0.85; }
+.foot a { color: var(--light); font-weight: 700; }
 
-/* ---- zoom (top right) */
-#nav { right: 12px; top: 12px; padding: 4px; display: flex; gap: 4px; }
-#nav button { border: 0; background: #2a2145; border-radius: 8px; width: 32px; height: 32px; font-weight: 800; }
+/* ---- keyboard hint (bottom centre, desktop) */
+#keys { left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%); padding: 6px 10px; display: flex; align-items: center; gap: 5px; }
+.key {
+  min-width: 26px; height: 26px; border-radius: 7px; border: 2px solid var(--light); display: grid; place-items: center;
+  font-weight: 900; font-size: 12px; transition: background 0.08s, color 0.08s;
+}
+.key.on { background: var(--light); color: var(--deep); }
+#keys small { margin-left: 4px; font-weight: 700; opacity: 0.85; }
 
-/* ---- on-screen controls: turn on the left thumb, drive on the right */
-#pad { position: fixed; inset: auto 12px 12px auto; display: flex; gap: 14px; pointer-events: none; }
-#pad .turn, #pad .drive { display: flex; gap: 8px; pointer-events: auto; }
+/* ---- on-screen controls (touch only): turn on the left thumb, drive on the right */
+#pad { display: none; position: fixed; left: 12px; right: 12px; bottom: max(14px, env(safe-area-inset-bottom)); justify-content: space-between; align-items: flex-end; pointer-events: none; }
+#pad > div { display: flex; gap: 10px; pointer-events: auto; }
 #pad .drive { flex-direction: column; }
 #pad button {
-  width: 60px; height: 60px; border-radius: 50%; border: 3px solid var(--ink); background: var(--panel);
-  font-size: 22px; font-weight: 900; box-shadow: 0 4px 0 var(--ink); touch-action: none; user-select: none; -webkit-user-select: none;
+  width: 66px; height: 66px; border-radius: 50%; border: var(--line) solid var(--light); background: var(--deep);
+  box-shadow: 3px 3px 0 var(--light); touch-action: none; user-select: none; -webkit-user-select: none;
+  display: grid; place-items: center; padding: 0;
 }
-#pad button.on { background: var(--mine); color: var(--ink); transform: translateY(3px); box-shadow: 0 1px 0 var(--ink); }
-#pad .turn { align-self: flex-end; }
+#pad svg { width: 28px; height: 28px; fill: none; stroke: var(--light); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+#pad button.on { background: var(--light); transform: translate(3px, 3px); box-shadow: none; }
+#pad button.on svg { stroke: var(--deep); }
 
-#toast { left: 50%; top: 76px; transform: translateX(-50%); padding: 6px 14px; z-index: 6; font-weight: 700; white-space: nowrap; }
+#toast { left: 50%; top: 84px; transform: translateX(-50%); padding: 7px 14px; z-index: 6; font-weight: 700; white-space: nowrap; }
 
-#welcome { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100vw - 32px)); padding: 20px 22px; z-index: 10; }
-#welcome h1 { margin: 0 0 8px; font-size: 32px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.02em; }
-#welcome h1 .t0 { color: var(--team-0); }
-#welcome h1 .t1 { color: var(--team-1); text-shadow: 0 0 1px #fff, 0 0 2px #fff, 0 0 3px #fff; }
-#welcome ul { padding-left: 18px; }
-#welcome li { margin: 4px 0; }
-#welcome kbd { background: #2a2145; border-radius: 4px; padding: 0 5px; font-size: 12px; }
-#welcomeTeam { font-size: 16px; }
-#welcomeTeam b { text-shadow: 0 0 1px #fff, 0 0 2px #fff; }
-#start { border: 3px solid var(--ink); background: var(--mine); color: var(--ink); border-radius: 999px; padding: 8px 20px; font-weight: 900; text-transform: uppercase; }
+#welcome { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(460px, calc(100vw - 32px)); padding: 22px 24px; z-index: 10; }
+#welcome h1 { margin: 0 0 10px; font-size: 40px; font-weight: 900; text-transform: uppercase; letter-spacing: -0.02em; line-height: 1; }
+#welcome h1 .t1 { -webkit-text-stroke: 1.5px var(--light); }
+#welcome p { margin: 0 0 10px; }
+#welcome ul { padding-left: 18px; margin: 0 0 12px; }
+#welcome li { margin: 5px 0; }
+#welcome kbd { border: 1.5px solid var(--light); border-radius: 5px; padding: 0 5px; font: 800 12px/1.5 inherit; }
+#welcomeTeam { font-size: 17px; font-weight: 700; }
+#start {
+  border: var(--line) solid var(--light); background: var(--light); color: var(--deep); border-radius: 999px;
+  padding: 10px 22px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em;
+}
 
 [hidden] { display: none !important; }
 
-/* phones: the controls split to either thumb, the panel moves to the top */
+/* touch screens: show the pad, hide the key hint */
+@media (hover: none) and (pointer: coarse) {
+  #pad { display: flex; }
+  #keys { display: none; }
+}
+
+/* phones: the score and map share the top, your card tucks in above the pad */
 @media (max-width: 720px) {
-  #me { top: 70px; bottom: auto; left: 10px; right: 10px; max-width: none; gap: 8px; padding: 6px 10px; }
-  #me a, #online { display: none; }
-  #nav { top: auto; bottom: 150px; right: 10px; }
-  #pad { inset: auto 10px 14px 10px; justify-content: space-between; }
-  #pad .turn { align-self: flex-end; }
-  .side { min-width: 52px; }
-  .side b { font-size: 16px; }
+  #hud { left: 10px; right: 10px; transform: none; width: auto; padding: 6px 10px; gap: 8px; }
+  .side b { font-size: 17px; }
+  .side .dot { display: none; }
+  #lead { display: none; }
+  #map { top: 72px; right: 10px; padding: 4px; }
+  #mini { width: 128px; height: 80px; }
+  #me { top: 72px; bottom: auto; left: 10px; width: auto; max-width: calc(100vw - 168px); padding: 8px 10px; gap: 6px; }
+  #me .foot { display: none; }
+  .label { display: none; }
+  #palettes { gap: 6px; }
+  .pal { width: 24px; height: 24px; }
+  #keys { display: none; }
 }

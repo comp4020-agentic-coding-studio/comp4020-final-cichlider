@@ -1,8 +1,9 @@
-// The rollers on the floor, and how they move. Every roller, human or NPC, has
+// The rollers on the wall, and how they move. Every roller, human or NPC, has
 // the same five actions: forward, back, turn left, turn right, or nothing. A
-// moving roller paints behind it. NPCs decide their action the same way a
-// player presses a key; they just do it in code. Pure, no I/O: the server owns
-// the clock and calls step().
+// moving roller paints behind it, and the wall is upright, so now and then wet
+// paint runs: a drip slides down from the roller and paints a thin line as it
+// goes. NPCs decide their action the same way a player presses a key; they
+// just do it in code. Pure, no I/O: the server owns the clock and calls step().
 
 import { ARENA, CELL, COLS, ROLLER, ROWS, Turf, type Team } from "./grid.ts";
 
@@ -11,6 +12,13 @@ export const BACK_SPEED = 150;
 export const TURN = 2.8; // radians per second
 export const RADIUS = 34; // body size for bumping into walls and each other
 export const MIN_PER_TEAM = 3; // NPCs fill each team up to this many rollers
+
+// Drips: how often a moving roller lets one go, how wide a line it leaves, and
+// how far it runs before it dries.
+export const DRIPS_PER_SEC = 1.0;
+export const DRIP_WIDTH = 14;
+const DRIP_MIN = 40, DRIP_MAX = 190;
+const DRIP_SPEED = 110; // when it starts; it slows as it runs out of paint
 
 export type Move = -1 | 0 | 1; // back, still, forward
 export type Turn = -1 | 0 | 1; // left, straight, right
@@ -36,12 +44,21 @@ interface Brain {
   backUntil: number;
 }
 
+export interface Drip {
+  x: number;
+  y: number;
+  team: Team;
+  left: number; // how much further it can run
+  total: number;
+}
+
 const NPC_NAMES = ["bot-otter", "bot-squid", "bot-kelp", "bot-urchin", "bot-shrimp", "bot-eel", "bot-krill", "bot-clam"];
 
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 export class World {
   readonly rollers = new Map<string, Roller>();
+  readonly drips: Drip[] = [];
   private brains = new Map<string, Brain>();
   private npcCount = 0;
 
@@ -118,7 +135,31 @@ export class World {
     this.collide();
     for (const r of this.rollers.values()) {
       const [ox, oy] = before.get(r.id)!;
-      if (r.move !== 0 && Math.hypot(r.x - ox, r.y - oy) > 0.5) this.turf.paint([ox, oy, r.x, r.y], r.team, now);
+      if (r.move === 0 || Math.hypot(r.x - ox, r.y - oy) <= 0.5) continue;
+      this.turf.paint([ox, oy, r.x, r.y], r.team, now);
+      if (this.rand() < DRIPS_PER_SEC * dt) this.drip(r);
+    }
+    this.runDrips(dt, now);
+  }
+
+  // A drip leaves from somewhere along the drum's width.
+  private drip(r: Roller): void {
+    const u = (this.rand() - 0.5) * ROLLER * 0.9;
+    const total = DRIP_MIN + this.rand() * (DRIP_MAX - DRIP_MIN);
+    this.drips.push({ x: r.x - Math.sin(r.h) * u, y: r.y + Math.cos(r.h) * u + ROLLER * 0.3, team: r.team, left: total, total });
+  }
+
+  // Each drip runs straight down, fast at first and slowing as it thins out,
+  // painting its team's colour, until it dries or reaches the bottom.
+  private runDrips(dt: number, now: number): void {
+    for (let i = this.drips.length - 1; i >= 0; i--) {
+      const d = this.drips[i];
+      const dy = Math.min(d.left, DRIP_SPEED * (0.25 + 0.75 * (d.left / d.total)) * dt);
+      const y = Math.min(ARENA.y1, d.y + dy);
+      this.turf.paint([d.x, d.y, d.x, y], d.team, now, DRIP_WIDTH);
+      d.left -= dy;
+      d.y = y;
+      if (d.left <= 0.5 || d.y >= ARENA.y1) this.drips.splice(i, 1);
     }
   }
 

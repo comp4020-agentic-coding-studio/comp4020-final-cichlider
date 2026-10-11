@@ -2,43 +2,72 @@
 <html lang="en-AU">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#120e24" />
     <title>Turf War</title>
-    <meta name="description" content="You're a paint roller. Two teams, one floor, no time limit: keep as much of it in your colour as you can." />
+    <meta name="description" content="You're a paint roller on a wall. Two teams, no time limit: keep as much of it in your colour as you can." />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <canvas id="wall" aria-label="The floor, seen from above at an angle. Your roller is circled."></canvas>
+    <canvas id="wall" aria-label="The wall, seen almost face on. Your roller has a dashed ring."></canvas>
 
     <header id="hud" aria-label="Score">
-      <div id="side0" class="side"><b id="pct0">0%</b><small id="name0">Yellow</small></div>
-      <div class="gauge" aria-hidden="true"><span id="bar0"></span><span id="bar1"></span></div>
-      <div id="side1" class="side"><b id="pct1">0%</b><small id="name1">Indigo</small></div>
+      <div id="side0" class="side">
+        <span class="dot t0"></span>
+        <div><b id="pct0">0%</b><small id="name0">Yellow</small></div>
+      </div>
+      <div class="track">
+        <div class="gauge" aria-hidden="true"><span id="bar0"></span><span id="bar1"></span></div>
+        <small id="lead">level</small>
+      </div>
+      <div id="side1" class="side">
+        <div><b id="pct1">0%</b><small id="name1">Indigo</small></div>
+        <span class="dot t1"></span>
+      </div>
     </header>
 
-    <section id="me" aria-label="You">
-      <div class="who">
-        <span id="teamTag">…</span>
-        <input id="name" maxlength="24" spellcheck="false" aria-label="your tag" />
+    <aside id="map" aria-label="Map">
+      <canvas id="mini" width="320" height="200" aria-label="The whole wall"></canvas>
+      <div class="zoom">
+        <button id="zoomOut" title="Zoom out (−)" aria-label="zoom out">−</button>
+        <button id="zoomIn" title="Zoom in (+)" aria-label="zoom in">+</button>
       </div>
-      <div id="palettes" role="group" aria-label="Colours"></div>
-      <span id="online"></span>
-      <a href="/readme/" title="What this is">about</a>
+    </aside>
+
+    <section id="me" aria-label="You">
+      <div class="row">
+        <span id="teamDot" class="dot"></span>
+        <div class="who">
+          <small>team <b id="teamTag">…</b></small>
+          <input id="name" maxlength="24" spellcheck="false" aria-label="your tag" />
+        </div>
+      </div>
+      <div class="row">
+        <small class="label">colours</small>
+        <div id="palettes" role="group" aria-label="Colours"></div>
+      </div>
+      <div class="row foot">
+        <span id="online"></span>
+        <a href="/readme/">about</a>
+      </div>
     </section>
 
-    <section id="nav" aria-label="Zoom">
-      <button id="zoomOut" title="Zoom out (-)">−</button>
-      <button id="zoomIn" title="Zoom in (+)">+</button>
-    </section>
+    <div id="keys" aria-hidden="true">
+      <span class="key" data-act="fwd">W</span>
+      <span class="key" data-act="left">A</span>
+      <span class="key" data-act="back">S</span>
+      <span class="key" data-act="right">D</span>
+      <small>to roll</small>
+    </div>
 
     <nav id="pad" aria-label="Controls">
       <div class="turn">
-        <button data-act="left" aria-label="turn left">⟲</button>
-        <button data-act="right" aria-label="turn right">⟳</button>
+        <button data-act="left" aria-label="turn left"><svg viewBox="0 0 24 24"><path d="M9 5 4 10l5 5M4 10h9a6 6 0 0 1 6 6v2"/></svg></button>
+        <button data-act="right" aria-label="turn right"><svg viewBox="0 0 24 24"><path d="m15 5 5 5-5 5M20 10h-9a6 6 0 0 0-6 6v2"/></svg></button>
       </div>
       <div class="drive">
-        <button data-act="fwd" aria-label="forward">▲</button>
-        <button data-act="back" aria-label="back">▼</button>
+        <button data-act="fwd" aria-label="forward"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+        <button data-act="back" aria-label="back"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7"/></svg></button>
       </div>
     </nav>
 
@@ -46,11 +75,11 @@
 
     <div id="welcome" hidden>
       <h1><span class="t0">Turf</span> <span class="t1">War</span></h1>
-      <p>You're a paint roller. Wherever you roll turns your team's colour. Paint nobody rolls over again fades away, so keep your turf fresh, and take theirs.</p>
+      <p>You're a paint roller on a wall. Everywhere you roll turns your team's colour, and wet paint runs down. Paint nobody rolls over again fades away, so keep your turf fresh, and take theirs.</p>
       <ul>
-        <li><b>Drive:</b> <kbd>W</kbd>/<kbd>S</kbd> or <kbd>↑</kbd>/<kbd>↓</kbd> forward and back, <kbd>A</kbd>/<kbd>D</kbd> or <kbd>←</kbd>/<kbd>→</kbd> to turn. On a phone, use the buttons.</li>
-        <li><b>Bots</b> 🤖 fill in when there aren't enough people, and step out when someone joins.</li>
-        <li><b>Colours:</b> pick a pair at the bottom. It only changes your screen.</li>
+        <li><b>Roll:</b> <kbd>W</kbd> <kbd>S</kbd> forward and back, <kbd>A</kbd> <kbd>D</kbd> to turn (or the arrow keys). On a phone, use the buttons.</li>
+        <li><b>Bots</b> fill in when there aren't enough people, and step out when someone joins.</li>
+        <li><b>Colours:</b> pick a pair in the corner. It only changes your screen.</li>
       </ul>
       <p id="welcomeTeam"></p>
       <button id="start">let's roll</button>

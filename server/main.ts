@@ -92,6 +92,9 @@ function saveFloor(): void {
 const rollersWire = () =>
   [...world.rollers.values()].map((r) => [r.id, r.team, Math.round(r.x), Math.round(r.y), Math.round(r.h * 100) / 100, r.move, r.npc ? 1 : 0, r.name]);
 
+// the head of each running drip, so clients can draw the bead of paint
+const dripsWire = () => world.drips.map((d) => [Math.round(d.x), Math.round(d.y), d.team]);
+
 let ticks = 0, lastReal = Date.now(), sinceHousekeeping = 0;
 setInterval(() => {
   const real = Date.now();
@@ -114,7 +117,7 @@ setInterval(() => {
   if (cells.length) floorDirty = true;
   // while the world is frozen, a heartbeat a second is plenty
   if (!clients.size || (!running && !cells.length && ticks % 20 !== 0)) return;
-  broadcast({ type: "tick", t: clock, r: rollersWire(), c: cells, s: [...turf.counts] });
+  broadcast({ type: "tick", t: clock, r: rollersWire(), d: dripsWire(), c: cells, s: [...turf.counts] });
 }, TICK_MS).unref();
 
 setInterval(() => { if (floorDirty) saveFloor(); }, 5000).unref();
@@ -282,17 +285,20 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return send(res, 202, { ok: true });
   }
 
-  // Everything a client needs to draw the floor from scratch. Paint is sent as
-  // [cell, owner, age in ms, ...] for every painted cell.
+  // Everything a client needs to draw the wall from scratch. The paint goes as
+  // two base64 arrays, one entry per cell: owner (0 bare, 1, 2), and how long
+  // ago it was painted, in tenths of a second.
   if (path === "/api/state" && method === "GET") {
-    const cells: number[] = [];
-    for (let i = 0; i < TOTAL; i++) if (turf.cells[i]) cells.push(i, turf.cells[i], Math.round(clock - turf.painted[i]));
+    const ages = new Uint16Array(TOTAL);
+    for (let i = 0; i < TOTAL; i++) if (turf.cells[i]) ages[i] = Math.min(65535, Math.round((clock - turf.painted[i]) / 100));
     return send(res, 200, {
       t: clock,
       arena: ARENA, cell: CELL, cols: COLS, rows: ROWS, roller: ROLLER, radius: RADIUS,
       fadeMs: FADE_MS, minPerTeam: MIN_PER_TEAM,
       rollers: rollersWire(),
-      cells,
+      drips: dripsWire(),
+      owners: Buffer.from(turf.cells).toString("base64"),
+      ages: Buffer.from(ages.buffer).toString("base64"),
       s: [...turf.counts],
       total: TOTAL,
       humans: [world.humans(0), world.humans(1)],
