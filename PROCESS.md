@@ -1,5 +1,35 @@
 # Process overview
 
+## Week 11 (crit 10): make two players legible
+
+Turf War already had two browser-local identities, server-controlled rollers,
+and a shared live floor. C10 made a gap visible: while two people could play,
+the deployed server gave no account of **which** player had joined, moved, or
+left. The [C10 change](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/f258793)
+keeps the quick anonymous arrival but makes it observable. Each meaningful
+event is one JSON line on stdout with a timestamp, stable player ID, visible
+tag, and team. Movement is logged only when the action changes; the four-second
+keepalive and 20 Hz simulation would otherwise bury the two-player story.
+Secrets and Authorization headers never enter the log.
+
+The authority decision is in
+[`docs/decisions/0004-browser-identity-and-authority.md`](docs/decisions/0004-browser-identity-and-authority.md):
+everyone sees the shared floor, but the server resolves each mutation from the
+browser's secret and only changes that player's name or roller. The request
+body cannot appoint another actor. Accounts would have made identity stronger
+across devices, but would contradict the README's ten-second arrival. The
+cost is that clearing browser storage creates a new pseudonymous player.
+
+The [same change](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/f258793)
+adds a two-player regression in `spec/turf.test.ts`: separate identities, a
+forged player ID in the request body that still acts only as the credential's
+owner, and unauthenticated mutations refused with 401. All 26 checks passed
+against the running app locally. I also read the server output while the
+checks played: `player_created`, `player_joined`, `player_renamed`,
+`player_action`, `action_denied`, and `player_left` appeared with separate
+players. This is the evidence I will use in the C10 demo, with two classmates
+in independent Chrome profiles and only the public URL.
+
 ## Week 9 (crit 8): from brief to a live wall
 
 **The idea.** The brief asks for a multi-user, real-time site that's *good*. I
@@ -275,6 +305,7 @@ slept. See
 ## Where good is checked
 
 See the table in `README.md`. The enforced claims live in `spec/grid.test.ts`,
-`spec/world.test.ts` and `spec/turf.test.ts`. The freeze and restart are
+`spec/world.test.ts` and `spec/turf.test.ts`, including the C10 two-player
+authority regression. The freeze and restart are
 checked by hand as above. What's judged (is the floor always changing, can you
 feel yourself changing it) gets judged by my pod playing it at the crit.
