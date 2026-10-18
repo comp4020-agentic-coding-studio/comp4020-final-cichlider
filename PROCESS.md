@@ -30,6 +30,13 @@ checks played: `player_created`, `player_joined`, `player_renamed`,
 players. This is the evidence I will use in the C10 demo, with two classmates
 in independent Chrome profiles and only the public URL.
 
+After pushing, the [GitHub run](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/actions/runs/39094010351)
+passed the spec, evidence and secret checks, deployed to Fly, and verified the
+public page. The course deploy check also found both page assets. I then made
+two separate live sessions, renamed them C10-A and C10-B, sent different
+actions, and confirmed Fly's logs attributed each action to its own player ID;
+an anonymous action returned 401 and produced an `action_denied` event.
+
 ## Week 9 (crit 8): from brief to a live wall
 
 **The idea.** The brief asks for a multi-user, real-time site that's *good*. I
