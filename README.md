@@ -52,6 +52,12 @@ tell who's winning or why. Good, for this game, means:
    homepage uses, and you pick whichever you like. It only changes your screen.
    A team is a team, whatever colour you see it in.
 
+Two browsers can play on the same floor without an account. Each browser gets
+its own tag and roller. Everyone can see the floor; only that browser can steer
+or rename its roller, and the server checks this on every change. The choice
+and its limits are in
+[`docs/decisions/0004-browser-identity-and-authority.md`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/docs/decisions/0004-browser-identity-and-authority.md).
+
 ### What I deliberately didn't build (yet)
 
 - **Splatting other players.** Rollers bump into each other, but nobody gets
@@ -69,6 +75,7 @@ tell who's winning or why. Good, for this game, means:
 | Doing anything, even standing still, puts you on the floor as a roller | enforced: `spec/turf.test.ts` |
 | The only actions are forward, back, left, right and still | enforced: `spec/turf.test.ts` (anything else is refused) and `spec/world.test.ts` (what each one does) |
 | Another open session sees your roller move within a second | enforced: `spec/turf.test.ts` times it over the live event stream |
+| Two browser profiles have separate identities and cannot steer or rename each other | enforced: `spec/turf.test.ts`; observed together in the live app and server logs |
 | The later roller over a cell owns it; cells are never counted twice | enforced: `spec/grid.test.ts` (the rule) and `spec/turf.test.ts` (end to end) |
 | Paint fades after 75 s unless renewed, and nothing is shown past its fade | enforced: `spec/grid.test.ts`, `spec/turf.test.ts` |
 | Drips run straight down from a moving roller, paint (and score) a thin line, and stop | enforced: `spec/world.test.ts` |

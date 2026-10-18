@@ -17,6 +17,13 @@ const TICK_MS = 50; // the simulation runs at 20 Hz
 const SEND_EVERY = 2; // and everyone hears about it at 10 Hz
 const IDLE_MS = 15_000; // a player who stops sending input leaves the floor
 
+// One structured line per meaningful human action. Fly collects stdout, so
+// the same log is available during the crit and when diagnosing later faults.
+// Never pass a session secret or an Authorization header to this function.
+function logEvent(event: string, fields: Record<string, string | number | boolean>): void {
+  console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
+}
+
 // ---------------------------------------------------------------- storage
 
 mkdirSync(DATA_DIR, { recursive: true });
@@ -108,7 +115,11 @@ setInterval(() => {
     sinceHousekeeping += dt;
     if (sinceHousekeeping >= 1000) {
       sinceHousekeeping = 0;
+      const departed = [...world.rollers.values()]
+        .filter((r) => !r.npc && clock - r.seenAt > IDLE_MS)
+        .map((r) => ({ user: r.id, tag: r.name, team: r.team }));
       world.expire(clock, IDLE_MS);
+      for (const player of departed) logEvent("player_left", player);
       world.reconcileNpcs(clock);
     }
   }
@@ -250,22 +261,31 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = (await readJson(req)) as { secret?: unknown };
     if (typeof body.secret === "string") {
       const found = q.userBySecret.get(body.secret) as User | undefined;
-      if (found) return send(res, 200, { ...withTeam(found), secret: body.secret });
+      if (found) {
+        const user = withTeam(found);
+        logEvent("player_returned", { user: user.id, tag: user.name, team: user.team });
+        return send(res, 200, { ...user, secret: body.secret });
+      }
     }
     const user = { id: randomUUID(), name: `${pick(ADJ)}-${pick(NOUN)}`, team: balancedTeam() };
     const secret = randomBytes(24).toString("base64url");
     q.insertUser.run(user.id, secret, user.name, user.team, Date.now());
+    logEvent("player_created", { user: user.id, tag: user.name, team: user.team });
     return send(res, 201, { ...user, secret });
   }
 
   if (path === "/api/me" && method === "PATCH") {
     const user = authed(req);
-    if (!user) return send(res, 401, { error: "unknown player" });
+    if (!user) {
+      logEvent("action_denied", { action: "rename", reason: "unknown_player" });
+      return send(res, 401, { error: "unknown player" });
+    }
     const name = cleanName(((await readJson(req)) as { name?: unknown }).name);
     if (!name) return send(res, 400, { error: "name must be 1-24 characters" });
     q.rename.run(name, user.id);
     const r = world.rollers.get(user.id);
     if (r) r.name = name;
+    if (name !== user.name) logEvent("player_renamed", { user: user.id, from: user.name, tag: name, team: user.team });
     return send(res, 200, { id: user.id, name, team: user.team });
   }
 
@@ -273,15 +293,26 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // on the floor; after that, sending it again (even "still") keeps you there.
   if (path === "/api/input" && method === "POST") {
     const user = authed(req);
-    if (!user) return send(res, 401, { error: "unknown player" });
+    if (!user) {
+      logEvent("action_denied", { action: "move", reason: "unknown_player" });
+      return send(res, 401, { error: "unknown player" });
+    }
     if (!allow("in:" + user.id, 1, 30, 60)) return send(res, 429, { error: "slow down a little" });
     const input = parseInput(await readJson(req));
     if (typeof input === "string") return send(res, 400, { error: input });
-    if (!world.rollers.has(user.id)) {
+    const previous = world.rollers.get(user.id);
+    const changed = !previous
+      ? input.move !== 0 || input.turn !== 0
+      : previous.move !== input.move || previous.turn !== input.turn;
+    if (!previous) {
       world.spawn(user.id, user.team, user.name, false, clock);
       world.reconcileNpcs(clock);
+      logEvent("player_joined", { user: user.id, tag: user.name, team: user.team });
     }
     world.setInput(user.id, input.move, input.turn, clock);
+    if (changed) {
+      logEvent("player_action", { user: user.id, tag: user.name, team: user.team, move: input.move, turn: input.turn });
+    }
     return send(res, 202, { ok: true });
   }
 

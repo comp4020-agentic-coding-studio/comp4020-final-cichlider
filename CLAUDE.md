@@ -25,6 +25,9 @@ the wall's rules are now reversed on purpose. Don't bring them back.
   palette is each viewer's own choice.
 - Never require sign-up to play. A visitor gets a tag and a team from
   `POST /api/session`, and the first `POST /api/input` puts them on the floor.
+- Never take a player ID from a mutation body as authority. Resolve the actor
+  from the bearer secret on the server; never print that secret or an
+  Authorization header in logs.
 - Never store anything outside `/data` (`DATA_DIR`): that volume is the only
   storage that survives a redeploy.
 - Never touch earlier versions' tables on the volume (`strokes`, `paint`,
@@ -34,6 +37,8 @@ the wall's rules are now reversed on purpose. Don't bring them back.
 
 - New live behaviour must reach other open sessions within ~1 second; the
   stream tests in `spec/turf.test.ts` are the yardstick.
+- Keep one structured server log line for each meaningful human event, with a
+  stable user ID and tag; do not log repeated input heartbeats or every tick.
 - Keep `server/grid.ts` and `server/world.ts` pure (no I/O, time passed in), so
   `spec/grid.test.ts` and `spec/world.test.ts` can drive them directly.
 - Keep the client's numbers (arena, cell, roller width, fade time) coming from

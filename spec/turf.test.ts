@@ -153,3 +153,28 @@ describe("only the five actions", () => {
     }
   });
 });
+
+describe("two people share the floor without sharing authority", () => {
+  it("takes the actor from the bearer secret, never a claimed ID in the body", async () => {
+    const a = await player();
+    const b = await player();
+    expect(a.id).not.toBe(b.id);
+    expect(a.secret).not.toBe(b.secret);
+
+    await input(a, 0, 0);
+    await input(b, 0, 0);
+    const renamed = await call("PATCH", "/api/me", a, { id: b.id, name: "first-player" });
+    expect(renamed.data).toMatchObject({ id: a.id, name: "first-player" });
+    const bBack = await call("POST", "/api/session", undefined, { secret: b.secret });
+    expect(bBack.data).toMatchObject({ id: b.id, name: b.name });
+
+    expect((await call("POST", "/api/input", a, { id: b.id, move: 1, turn: 0 })).status).toBe(202);
+    const state = (await call("GET", "/api/state")).data;
+    expect(rollerOf(state, a.id)?.[5]).toBe(1);
+    expect(rollerOf(state, b.id)?.[5]).toBe(0);
+
+    expect((await call("PATCH", "/api/me", undefined, { name: "intruder" })).status).toBe(401);
+    expect((await call("POST", "/api/input", undefined, { move: 1, turn: 0 })).status).toBe(401);
+    await input(a, 0, 0);
+  });
+});
