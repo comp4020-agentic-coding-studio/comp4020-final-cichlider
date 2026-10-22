@@ -1,318 +1,105 @@
 # Process overview
 
-## Week 11 (crit 10): make two players legible
+## From a shared wall to a game
 
-Turf War already had two browser-local identities, server-controlled rollers,
-and a shared live floor. C10 made a gap visible: while two people could play,
-the deployed server gave no account of **which** player had joined, moved, or
-left. The [C10 change](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/f258793)
-keeps the quick anonymous arrival but makes it observable. Each meaningful
-event is one JSON line on stdout with a timestamp, stable player ID, visible
-tag, and team. Movement is logged only when the action changes; the four-second
-keepalive and 20 Hz simulation would otherwise bury the two-player story.
-Secrets and Authorization headers never enter the log.
+I started with a graffiti wall because the final brief's three fixed demands
+could serve one idea: other people should make the surface more interesting.
+The first version, [`449b251`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/449b251),
+stored strokes, streamed changes and let viewers hide a painter locally. That
+protected each person's marks, but it also kept painters apart. When I tried
+to make a territory game from it, I had to reverse that rule. In
+[`74094fd`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/74094fd),
+I directed the agent toward a Splatoon-inspired contest with two teams, a
+roller and rounds. I played it and found that it was still a drawing app with
+a scoreboard: the cursor could paint anywhere, so position did not matter.
 
-The authority decision is in
-[`docs/decisions/0004-browser-identity-and-authority.md`](docs/decisions/0004-browser-identity-and-authority.md):
-everyone sees the shared floor, but the server resolves each mutation from the
-browser's secret and only changes that player's name or roller. The request
-body cannot appoint another actor. Accounts would have made identity stronger
-across devices, but would contradict the README's ten-second arrival. The
-cost is that clearing browser storage creates a new pseudonymous player.
+My next instruction was the decisive one: **the player is the roller**. In
+[`9986c54`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/9986c54),
+the agent replaced cursor painting with forward, back, left, right and still;
+added bots for a quiet room; and removed rounds. I specified that choosing a
+palette changes only the viewer's colours, not the two teams. Removing rounds
+created a problem: permanent paint would fill the wall, but wall-clock fading
+would erase it while Fly slept. The solution is a game clock that stops with
+no human on the wall. The options and the cost of that choice are in
+[`0003-the-world-freezes-when-empty.md`](docs/decisions/0003-the-world-freezes-when-empty.md).
 
-The [same change](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/f258793)
-adds a two-player regression in `spec/turf.test.ts`: separate identities, a
-forged player ID in the request body that still acts only as the credential's
-owner, and unauthenticated mutations refused with 401. All 26 checks passed
-against the running app locally. I also read the server output while the
-checks played: `player_created`, `player_joined`, `player_renamed`,
-`player_action`, `action_denied`, and `player_left` appeared with separate
-players. This is the evidence I will use in the C10 demo, with two classmates
-in independent Chrome profiles and only the public URL.
+The tilted view and blurred paint then failed my visual test. I wanted an
+upright wall, almost face on, where wet paint could run downward. In
+[`4178fb1`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/4178fb1),
+the client began outlining the server's ten-unit cells as sharp vector paths;
+drips became server-simulated paint that changes the score. I had rejected an
+earlier rounded-bar renderer because it made rows look like beads. I had also
+rejected decorative, browser-only drips: the visible wall must agree with the
+server's count. These corrections became rules in `CLAUDE.md` and checks in
+`spec/grid.test.ts` and `spec/world.test.ts`. My role was to play each version,
+notice the wrong interaction or image, and turn that observation into a rule
+the agent could implement and verify.
 
-After pushing, the [GitHub run](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/actions/runs/39094010351)
-passed the spec, evidence and secret checks, deployed to Fly, and verified the
-public page. The course deploy check also found both page assets. I then made
-two separate live sessions, renamed them C10-A and C10-B, sent different
-actions, and confirmed Fly's logs attributed each action to its own player ID;
-an anonymous action returned 401 and produced an `action_denied` event.
+## Stack and agent workflow
 
-## Week 9 (crit 8): from brief to a live wall
+One small Fly machine and one persistent volume favoured a single Node 24
+process. TypeScript runs with Node's type stripping, so I have no separate
+compile-and-serve path. Built-in SQLite stores player identities, the painted
+cell grid and the game clock on the volume. The server runs the world at 20 Hz
+and sends positions, drips, changed cells and scores at 10 Hz through
+server-sent events (SSE). Inputs travel in ordinary POST requests. SSE fits a
+game where one server sends frequent updates to many viewers; WebSockets
+would add a bidirectional channel without changing the five-action input
+model. A browser canvas renders the world directly, without a UI framework.
+The only runtime package, `marked`, renders the complete README at `/readme/`.
 
-**The idea.** The brief asks for a multi-user, real-time site that's *good*. I
-chose a graffiti wall because co-presence is built into what a wall is: it's
-more interesting when other people have painted on it, and most interesting
-when they're painting next to you right now. The one design decision I gave the
-agent up front was the tension in the README: a wall that's crowded but not
-ruined. That's why the app lets you **hide a painter for yourself** instead of
-letting anyone delete anyone.
+The server is authoritative. It moves each roller, assigns ownership and
+counts the score; clients send actions, not painted pixels. That makes the
+last-roller-wins rule deterministic even when two people cover one cell in the
+same tick. It also means the player's own paint arrives after a round trip.
+I accepted that delay rather than let a client claim arbitrary territory;
+[`0002-last-roller-wins.md`](docs/decisions/0002-last-roller-wins.md)
+compares the alternatives. The pure `server/grid.ts` and `server/world.ts`
+modules let tests exercise ownership, fading, drips, collision and bots
+without a network. `spec/turf.test.ts` then exercises real HTTP and SSE with
+two players. I use `CLAUDE.md` to keep the agent from breaking the server's
+authority, the stopped clock or the exact match between paint and score.
 
-**Directing the agent.** I gave Claude Code the concept, the tool range I wanted,
-"a big wall you can wander across", and the per-viewer ignore feature. I also
-asked it to paint the first marks itself, so the wall isn't empty for the first
-stranger. It proposed the stack below; I accepted it for the reasons in the
-decision record.
+The harness also exposed mistakes in my checks. A round-era test once waited
+into the next round and timed out even though the game worked; I reproduced
+the boundary and changed the test's waiting window in
+[`bd16ba0`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/bd16ba0).
+Later, a live timing check started its clock before the event stream connected.
+Local connections hid the error; a remote run did not. In
+[`12449e7`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/12449e7)
+I changed it to wait for an open stream before timing a move. This does not
+remove real network latency, but it makes the test measure the promised
+delivery rather than connection setup. A Node startup failure from an
+unsupported TypeScript parameter property led me to enable
+`erasableSyntaxOnly`, so type checking now catches that syntax before boot.
 
-**Grounding.** The work was checked against the running app, not just read:
-`pnpm check` ran against a local server (8 tests: the course's 2, plus 6 in
-`spec/wall.test.ts` for persistence, sub-second sync, ownership and input
-validation). A headless-Chrome screenshot of the seeded wall confirmed the
-rendering before deploy. The whole first version is
-[`449b251`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/449b251).
+## Making two players legible
 
-**Corrections along the way.** The first client build started its render loop
-before the drawing state existed, which would have thrown on load. It was caught
-by reading the module order before running it and fixed in the same commit. The
-first screenshot attempt hung because headless Chrome's virtual time never
-settles while a page holds an open event stream and an animation loop. I switched
-to a timed capture rather than changing the app to suit the tool.
+For crit 10, two browsers could already see and change the same wall, but the
+server could not tell their story from its logs. In
+[`f258793`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/f258793),
+the server began writing one structured line for each arrival, departure,
+rename, changed action and denied action, including a stable user ID, tag and
+team. It omits bearer secrets and repeated input heartbeats. The same change
+added a two-player regression: a forged player ID in a request body still
+changes only the credential's owner, while an unauthenticated mutation gets
+401. The [identity decision](docs/decisions/0004-browser-identity-and-authority.md)
+records why I chose anonymous browser identity over accounts and what that
+choice cannot prove. I then used two live sessions to confirm the Fly logs
+attributed their actions to separate IDs; the documented C10 run,
+[`5505021`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/5505021),
+records that deployed rehearsal.
 
-## Decision record 1: the stack
+## What remains to judge
 
-**Context.** One shared-cpu-1x machine with 256 MB, one volume at `/data`, and
-no database server. It needs sub-second fan-out to every open browser. One
-person builds it in a few weeks.
-
-**Decision.**
-- **Node 24, TypeScript run directly** (type stripping): no build step, and the
-  same language as the course's harness.
-- **SQLite via the built-in `node:sqlite`**, file on `/data`: zero extra
-  services, and durable across redeploys.
-- **Server-sent events** for live updates. Writes are ordinary POSTs. A wall's
-  traffic is mostly server→many-clients (strokes, cursors), which is exactly what
-  SSE does. It reconnects by itself, and it passes through Fly's proxy with only a
-  keep-alive ping. WebSockets would buy duplex traffic I don't need.
-- **Plain canvas JS** on the client. The interesting work is in drawing, and a
-  framework adds nothing there.
-- **Strokes as vectors**, not pixels: each stroke stores its points, tool and
-  seed. That makes per-viewer hiding trivial (just don't draw that painter's
-  strokes), which a shared bitmap could never do. It also makes undo exact.
-- One runtime dependency, `marked`, to render README.md at `/readme/`
-  server-side.
-
-**Consequences.** The whole visible region is redrawn from vectors when the view
-moves. That's fine at hundreds to low thousands of strokes per screen. If the
-showcase pushes past that, the next step is cached tiles, and that will get its
-own record. Rate limiting is in memory, which is fine with one machine.
-
-## Week 10 (crit 9): from a wall to a game
-
-**The pivot.** Crit 9 asks for real-time and for one decision about how the app
-behaves when several people use it at once. The wall already had live sync
-from crit 8, so the real-time half was done. Thinking about the decision half
-showed me what was missing. On the wall, several people at once mostly meant
-several people *not* bumping into each other: everyone had their own patch, and
-"nobody can cover anybody" kept them apart. I wanted the opposite, people
-crashing into each other on purpose. So I turned it into a game, modelled on
-Splatoon's Turf War. That reversed the wall's founding rule, and the reversal
-became this week's decision record.
-
-**Directing the agent.** I set the reference (Splatoon), the mode (turf war),
-the tool (one fixed roller instead of a toolbar), and the colours (two team
-colours; Splatoon-style placeholders for now, to be swapped for the two from my
-homepage). I then asked Claude Code to act as game designer and propose the
-core loop before writing code. It proposed: join the smaller team, roll paint,
-last roller owns the floor, a fixed arena, timed rounds, then result and the
-next round. I asked for a near-complete version this week rather than just the
-decision doc. The ink tank was added during planning, because without it one
-fast player could sweep the whole floor in a single stroke. The whole change is
-[`74094fd`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/74094fd).
-
-**Grounding.** `pnpm check` passes against a local server: 17 tests, the
-course's 2 plus 5 in `spec/grid.test.ts` on the ownership rule itself and 10 in
-`spec/turf.test.ts` against the running app (teams, live sync under a second,
-last roller wins, server-assigned colour, ink limit, bad input). Some things
-the spec can't reach, since CI can't wait out a 150-second round, so I checked
-those by hand with a server running 20-second rounds:
-
-- I watched the event stream go round-start → round-end (winner, cell counts)
-  → 3 s break → round-start.
-- I confirmed in SQLite that each finished round was recorded and its paint
-  deleted.
-- I killed the server mid-round, restarted it, and got the same round id and
-  the same cell counts back.
-
-Headless-Chrome screenshots at 1280×800 and at 390 px wide checked the layout.
-
-**Corrections along the way.**
-- The plan said to reuse the wall's speed-sensitive brush as the roller's look.
-  That would have made the drawn band narrower or wider than what the grid
-  scores, which breaks "the floor is the scoreboard". So the roller is drawn as
-  a fixed-width band, the same shape the grid stamps (now a rule in `CLAUDE.md`).
-- The README's link to the decision record would have pointed to a path the
-  server doesn't serve once rendered at `/readme/`. It now links to the file
-  on GitHub.
-- The welcome title's pink-to-lime gradient turned muddy orange in the middle,
-  so it's now two solid words in the two team colours.
-- The first phone screenshot looked broken. The cause was headless Chrome's
-  minimum window width, not the layout: rendered inside a real 390 px frame, it
-  fits.
-- When seeding test paint, back-to-back strokes from one player were refused.
-  That was the ink tank working as designed, not a bug.
-- The spec failed once out of many runs. A test that landed in the last
-  seconds of a round waited for the next one, which took longer than vitest's
-  5-second limit. I reproduced it by looping the spec across round boundaries,
-  gave the round-waiting tests 30 seconds, then ran the loop 45 times with no
-  failures.
-
-**Kept, deliberately.** The crit-8 `strokes` table is still on the Fly volume,
-untouched. Turf war writes to new `paint` and `rounds` tables. Rather than
-delete the old wall's paint, I left it, unused. `scripts/seed.ts` is retired:
-rounds wipe the floor on their own, so there's no empty wall to dress up for the
-first visitor.
-
-**Known gap (since fixed).** The arena was landscape (2400×1400), which showed
-as a thin strip on a portrait phone. The second pivot below fixed it, because
-the camera now follows your roller.
-
-## Week 10, second pivot: you are the roller
-
-**Why again.** I played the round-based version and it was still a drawing
-app with a scoreboard: you dragged across the floor from anywhere, so position
-meant nothing. I changed the rules again, the same week:
-
-- The player *is* a roller, with five actions: forward, back, turn left, turn
-  right, stay.
-- The scene is 2.5D.
-- Rounds are gone.
-- NPCs fill in when there aren't enough people.
-- There are several palettes to pick from, taken from my homepage.
-
-Before any code I settled two ambiguous points. First, "pick a palette" means
-picking one of the homepage's light/dark *pairs* for your own screen, so there
-are still two teams. Second, without rounds, something has to stop the floor
-filling up and freezing: paint now fades if nobody renews it.
-
-**Directing the agent.** This rewrite turned the architecture over, so I had
-Claude Code lay out the design before changing anything:
-
-- The server simulates every roller at 20 Hz and streams positions and changed
-  cells at 10 Hz.
-- Clients send only their current action.
-- NPCs use the same five actions through the same physics.
-- Paint fades by a *game clock* that stops when nobody is on the floor. Without
-  that, fading and "still there when you come back" contradict each other,
-  because the Fly machine sleeps when nobody's connected. That became
-  decision record 3.
-
-The ink tank went too: with no "lift off" action, there's nothing for it to
-pace. The whole change is
-[`9986c54`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/9986c54).
-
-**Grounding.** `pnpm check` passes with 24 tests:
-
-- the course's 2;
-- 7 in `spec/grid.test.ts` (ownership, fading, change reporting, save/restore);
-- 6 in the new `spec/world.test.ts`, which drives the pure simulation directly:
-  each action's effect, walls, collisions, NPCs topping up and stepping aside,
-  and NPCs actually painting;
-- 9 in `spec/turf.test.ts` against the running server, including a roller's
-  move reaching another session's stream within a second.
-
-I looped the server spec 40 times while the floor's paint aged past the fade
-time, with no failures. By hand:
-
-- With nobody on the floor, the game clock read the same 3 s apart (frozen).
-- After a restart, the clock and the score came back identical.
-
-I drove the game in a real headless Chrome over the DevTools protocol (dismiss
-the welcome, hold W, then D) at 1280×800 and 390×844. The server's state
-confirmed the roller moved and painted, and the screenshots confirmed the
-isometric floor, the rollers, the bots and the palette picker. Because the
-camera now follows your roller, the portrait-phone gap from the first pivot is
-gone.
-
-**Corrections along the way.**
-- The server wouldn't start: node's type stripping can't run TypeScript
-  parameter properties, and `tsc` hadn't complained. I fixed the class and
-  turned on `erasableSyntaxOnly`, so `pnpm typecheck` now catches this before
-  boot.
-- A test asserted that bots are always present. After repeated runs, enough
-  human test players were still on the floor that the bots had correctly
-  stepped aside. The test now checks the real invariant: bots = max(0, 3 −
-  people) per team.
-- The snapshot test caught a real inconsistency. Fading ran once a second, so
-  a cell could be reported up to a second past its fade time. Fading now runs
-  every tick.
-- The first screenshots showed rollers as thin sticks, and as tall slivers when
-  they faced the camera. I enlarged them and replaced the fake drum (a thick
-  line with fixed end ellipses) with a projected cylinder: two upright end
-  circles, joined by their outline.
-
-**Kept, deliberately.** The `paint` and `rounds` tables from earlier in the
-week sit on the volume next to the wall's `strokes`, untouched. The floor is
-now one row in a `floor` table.
-
-## Week 10, third pass: a wall, not a floor
-
-**What I asked for.** The isometric view was tilted much further than I'd
-meant, the paint was blurry, and the scene should be a wall, which is upright,
-so paint should run. I asked for a near face-on view, sharper rendering,
-dripping paint, and a better UI.
-
-**What changed.**
-- The view is now almost face on. The wall is foreshortened only slightly, and
-  rollers and the wall's bottom edge stand out a little, which keeps the 2.5D
-  feel.
-- Blurriness had a concrete cause: the paint was an 80×50 image stretched to
-  fill the screen. Cells are now 10 units (160×100), and the client turns them
-  into vector outlines with marching squares, filled as one path per team so
-  there are no seams. It's sharp at any zoom and still exactly the scored cells.
-- Drips are simulated on the server and are part of the score. A drip drawn
-  only in the browser would make what you see disagree with what counts,
-  breaking the README's "the floor is the scoreboard".
-- The UI follows my homepage's two-colour language: a score bar, a minimap, a
-  player card, a key hint on desktop, and the touch pad only on touch screens.
-
-**Grounding.** `pnpm check` passes, 25 tests, including a new one: a moving
-roller lets drips go, they run straight down, paint a thin line, and stop
-within their maximum length. I drove the game in headless Chrome at 2× pixel
-density, on desktop and on a touch-emulated phone, and checked the screenshots.
-
-**Corrections along the way.**
-- The first face-on attempt drew each row of paint as a rounded bar, so edges
-  looked like stacks of beads. Marching squares replaced it.
-- One automated drive showed no player on the server. The driver had clicked
-  "let's roll" before the page had a session, and the page had been waiting on
-  a Google Fonts request. The driver now waits for the session, and the page
-  uses system fonts, so the game doesn't depend on a third-party request.
-- The dark team's score, drawn in its own deep colour, was hard to read on the
-  dark panel. Both scores are now in the light colour, with the team dot
-  marking which is which.
-
-**After deploying.** CI's check and deploy both passed. Running the spec
-against the live site from my laptop, the "within a second" test failed, at 4
-to 6 seconds. Two separate things were going on:
-
-- The test started its clock before opening the event stream, so connecting
-  counted as sync delay. Locally connecting is instant, so it never showed.
-  The test now connects first, waits for a tick, and only then times the move.
-- My laptop's route to Fly went through the Paris edge (`fly-request-id …-cdg`)
-  and took 1.5 to 3 s per request, so no app could beat a second from here.
-  Once connected, the stream itself delivered a tick roughly every 100 ms.
-
-The honest check of the one-second promise is from where it will be played: on
-phones in the crit room, close to the Sydney region.
-
-## Decision record 2: the later roller wins
-
-When two teams roll over the same cell, the later roller (in the server's
-tick order) takes it. The options I weighed (first-holds, blending, letting
-clients paint) and what this choice costs are in
-[`docs/decisions/0002-last-roller-wins.md`](docs/decisions/0002-last-roller-wins.md),
-revised for the roller version.
-
-## Decision record 3: the world freezes when empty
-
-Paint fades by a game clock that only runs while someone is on the floor, so
-the floor is still there when people come back, even after the machine has
-slept. See
-[`docs/decisions/0003-the-world-freezes-when-empty.md`](docs/decisions/0003-the-world-freezes-when-empty.md).
-
-## Where good is checked
-
-See the table in `README.md`. The enforced claims live in `spec/grid.test.ts`,
-`spec/world.test.ts` and `spec/turf.test.ts`, including the C10 two-player
-authority regression. The freeze and restart are
-checked by hand as above. What's judged (is the floor always changing, can you
-feel yourself changing it) gets judged by my pod playing it at the crit.
+The automated checks cover the rules and a local sub-second stream, and the
+deployed rehearsal covers two distinct identities. They do not decide whether
+the roller feels responsive to a newcomer on a phone or whether a busy wall is
+still readable. I judged the earlier versions by playing them and checking
+desktop and touch screenshots; the final version still needs a fresh
+two-person field test. Persistence has a deliberate limit: the floor is saved
+every five seconds and on clean shutdown, so an abrupt crash can lose up to
+five seconds of paint. A manual stop/start restored the clock and score; a
+next-day return after an actual Fly restart remains to be checked before the
+final deadline. I would rather state those limits than claim that a green
+check alone proves the experience is good.

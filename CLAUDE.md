@@ -61,7 +61,7 @@ the wall's rules are now reversed on purpose. Don't bring them back.
 - `server/grid.ts`: the arena, who owns each cell, fading.
 - `server/input.ts`: what a client may send.
 - `public/`: the client. `app.js` handles input, sync, camera and HUD;
-  `render.js` draws the isometric floor and rollers; `palettes.js` holds the
+  `render.js` draws the near-face-on wall and rollers; `palettes.js` holds the
   homepage colour pairs.
 - `spec/`: `grid.test.ts` and `world.test.ts` drive the pure modules;
   `turf.test.ts` runs against the running app. Test players leave the floor by

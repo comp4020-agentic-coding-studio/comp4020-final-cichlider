@@ -1,115 +1,56 @@
 # Turf War
 
-You're a paint roller. Two teams share one upright wall, seen almost face on.
-Wherever you roll turns your team's colour, including over the other team's
-paint, and because the wall is upright, wet paint now and then runs down in
-drips that claim a thin line as they go. Paint nobody rolls over again slowly
-fades back to bare wall, so the
-map never fills up and stays that way: you keep your turf fresh, and you take
-theirs. There are no rounds and no clock. You drop in, roll for as long as you
-like, and leave. When there aren't enough people, bots roll alongside you and
-step aside as soon as someone joins.
+[Play Turf War](https://comp4020-final-cichlider.fly.dev). You are a paint roller
+on an upright wall. Two teams share it. Roll over a patch to claim it, roll over
+the other team's paint to take it, and keep moving: unrenewed paint fades.
+Sometimes wet paint runs down the wall, and those drips count too. There is no
+round timer or final victory screen. The contest is the changing wall itself.
 
-Live at <https://comp4020-final-cichlider.fly.dev>.
+The first visit gives you a tag and a team without an account. Select **Let's
+roll**, then use W/S to move and A/D to turn (arrow keys also work); on a phone,
+use the four visible buttons. The score bar counts the painted area of each
+team. The palette picker changes only your view, so everyone still plays the
+same two-team game.
 
-*This started as The Wall, a free-painting graffiti wall (crit 8). In crit 9
-week it became a game: first a round-based game you played with the cursor,
-then this one, where you drive the roller itself. `PROCESS.md` has the whole
-story.*
+## What good means here
 
-## What good means for turf war
+**A good Turf War is legible within seconds and still worth moving through five
+minutes later.** [Nintendo's Turf War](https://www.nintendo.com/au/games/nintendo-switch/splatoon-2/)
+made coloured territory a readable objective, but its timed match and weapons
+are more structure than this small shared wall needs. I kept the pleasure of
+reclaiming ground and made the player the roller. You must travel to change a
+place; clicking a distant spot cannot win it for you. The wall is also the
+scoreboard: each patch has exactly one current owner, and the server counts the
+same cells the browser draws. The later roller takes a contested patch, while
+paint nobody renews fades after 75 seconds of **active play**. When the last
+human leaves, the game clock and wall freeze. The next visitor returns to the
+same contest instead of an empty reset. [The overwrite rule](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/docs/decisions/0002-last-roller-wins.md)
+and [the stopped clock](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/docs/decisions/0003-the-world-freezes-when-empty.md)
+record those choices and their costs.
 
-*Third version, written for crit 9, after turning the roller into the player.*
+This is built for a few people sharing a room, including someone who arrives
+alone. Bots fill each team to three rollers and step aside as humans join.
+[Robin Sloan's account of a home-cooked app](https://www.robinsloan.com/notes/home-cooked-app/)
+helped me treat a small audience as a design decision rather than a shortfall.
+The earlier [r/place canvas](https://redditinc.com/news/the-day-redditors-broke-the-internet-again)
+showed how other people's marks can make a shared surface compelling; here,
+overwriting and fading turn that shared surface into a continuing game.
 
-A turf war is good when **the floor is always changing, and you can feel
-yourself changing it.** Online territory games tend to fail in one of two ways:
-either the board fills up and freezes, or it turns into noise and nobody can
-tell who's winning or why. Good, for this game, means:
+## Promises and evidence
 
-1. **You're rolling within ten seconds.** No sign-up, no lobby, no waiting for a
-   round. You arrive with a tag and a team, and you're on the floor.
-2. **You are the roller.** Five actions: forward, back, turn left, turn right,
-   or stay put. No pointing and clicking at a spot across the map. Territory
-   has to be travelled to, so position and route matter.
-3. **The floor is the scoreboard.** The colour on any spot is the team that
-   owns it, exactly as the server counts it. The bar at the top is the floor,
-   counted.
-4. **The later roller takes it.** Rolling over the other team's paint makes it
-   yours. That's what keeps the front line moving. (The decision, the options
-   and what it costs:
-   [`docs/decisions/0002-last-roller-wins.md`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/docs/decisions/0002-last-roller-wins.md).)
-5. **Turf has to be kept.** Paint fades after 75 seconds unless someone renews
-   it, so nobody can paint the map once and walk away the winner. That replaces
-   rounds: the game never needs to be reset, because it never stops moving.
-6. **There's always a game on.** Bots fill each team up to three rollers. One
-   person alone still has a match to play, and a full room plays without bots.
-7. **What you leave is still there when you come back.** When the last person
-   leaves, the world freezes: bots stop and paint stops fading. Come back
-   tomorrow and the floor is exactly as it was left. (Why it's a game clock
-   and not the wall clock:
-   [`docs/decisions/0003-the-world-freezes-when-empty.md`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/docs/decisions/0003-the-world-freezes-when-empty.md).)
-8. **The colours are yours.** There are four colour pairs, the same four my
-   homepage uses, and you pick whichever you like. It only changes your screen.
-   A team is a team, whatever colour you see it in.
-
-Two browsers can play on the same floor without an account. Each browser gets
-its own tag and roller. Everyone can see the floor; only that browser can steer
-or rename its roller, and the server checks this on every change. The choice
-and its limits are in
-[`docs/decisions/0004-browser-identity-and-authority.md`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/docs/decisions/0004-browser-identity-and-authority.md).
-
-### What I deliberately didn't build (yet)
-
-- **Splatting other players.** Rollers bump into each other, but nobody gets
-  knocked out. A respawn loop is the next layer of game, not the first.
-- **Weapons beyond the roller.** One tool, done well, before a loadout.
-- **Accounts, ranks and match history.** There's nothing to grind.
-- **Free choice of colour.** You choose a *pair*, so colour still means team.
-
-### Which claims are checked, and which are judged
-
-| Claim | How it's held |
+| Promise | How I check it |
 | --- | --- |
-| A stranger gets a tag and a team with no sign-up, and keeps both on return | enforced: `spec/turf.test.ts` |
-| A newcomer joins the side with fewer people on the floor right now | enforced: `spec/turf.test.ts` |
-| Doing anything, even standing still, puts you on the floor as a roller | enforced: `spec/turf.test.ts` |
-| The only actions are forward, back, left, right and still | enforced: `spec/turf.test.ts` (anything else is refused) and `spec/world.test.ts` (what each one does) |
-| Another open session sees your roller move within a second | enforced: `spec/turf.test.ts` times it over the live event stream |
-| Two browser profiles have separate identities and cannot steer or rename each other | enforced: `spec/turf.test.ts`; observed together in the live app and server logs |
-| The later roller over a cell owns it; cells are never counted twice | enforced: `spec/grid.test.ts` (the rule) and `spec/turf.test.ts` (end to end) |
-| Paint fades after 75 s unless renewed, and nothing is shown past its fade | enforced: `spec/grid.test.ts`, `spec/turf.test.ts` |
-| Drips run straight down from a moving roller, paint (and score) a thin line, and stop | enforced: `spec/world.test.ts` |
-| Bots fill each team to three, and only to three | enforced: `spec/world.test.ts`, `spec/turf.test.ts` |
-| The world freezes when empty, and the floor survives a restart | `spec/grid.test.ts` checks a saved floor loads back exactly; the freeze and the restart are checked by hand (see `PROCESS.md`), since the spec can't stop the server |
-| The floor is always changing, and you can feel yourself changing it | **judged**: by watching my crit pod play it |
+| Two separate browsers can play together but cannot steer or rename one another | Server-side identity checks in [`spec/turf.test.ts`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/spec/turf.test.ts); [authority decision](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/docs/decisions/0004-browser-identity-and-authority.md) |
+| Another open session sees a roller move within about a second | A timed live-stream check in `spec/turf.test.ts` |
+| The painted wall and score agree, including drips, overwriting and fading | Pure rules in `spec/grid.test.ts` and `spec/world.test.ts`, plus server checks in `spec/turf.test.ts` |
+| The wall survives a restart and stops ageing when empty | Save/restore check in `spec/grid.test.ts`; a manual restart and idle-clock check recorded in [`PROCESS.md`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/PROCESS.md) |
+| Playing feels immediate and the territory remains readable | Judged by playing, watching the wall and checking the desktop and phone layouts; a fresh two-person field test remains to be done |
 
-## What I read and looked at
-
-- **Splatoon** (Nintendo, 2015 onwards), Turf War mode. Paint is territory,
-  later paint wins, and the score is the floor. The roller is Splatoon's
-  simplest weapon. Here you don't carry it, you are it.
-- **Tank controls**, from early 3D games like *Resident Evil* and *Battlezone*.
-  Forward/back plus turning on the spot is the smallest action space that still
-  needs skill. It also works on a phone with four buttons and no joystick.
-- **Isometric games** (*Monument Valley*, *SimCity 2000*). A 2:1 isometric view
-  of one raised slab gives the floor depth without a 3D engine.
-- **r/place** (Reddit, 2017 and 2022). Overwriting is what creates the drama. I
-  also took one lesson from how r/place ended: a canvas that only fills up ends
-  up frozen. Fading is the answer here.
-- **Robin Sloan, "An app can be a home-cooked meal"** (2020). This is for a room
-  full of people at a crit or the showcase. One floor, always on, bots for the
-  quiet moments.
-- **My homepage's palettes.** Four pairs of one loud light colour and one deep
-  dark one. The light colour is one team and the dark colour is the other.
-
-## How it's built
-
-A single Node 24 process (TypeScript, run directly, no build step) runs the
-world at 20 ticks a second. It moves every roller according to its current
-action, has the bots choose theirs, and stamps paint into a grid of 20-unit
-cells. Ten times a second it sends everyone the rollers' positions and the
-cells that changed, plus where each drip is, over server-sent events. Clients
-send only which of the five actions they're doing. The browser turns the grid
-of 10-unit cells into smooth vector outlines (marching squares), so the paint
-stays sharp at any zoom and sits exactly on the cells that are scored. The floor and the game clock are saved to SQLite on the Fly
-volume every few seconds. `PROCESS.md` has the reasons.
+The browser holds a random player secret; the server uses it to authorise only
+that player's actions. This allows instant entry, but it is a browser identity,
+not an account across devices. The shared wall is public; there is no private
+user content. I left out accounts, ranks, weapons and knockouts because they
+would distract from movement, paint and co-presence. The app runs on one Node
+process with SQLite on Fly's persistent volume and server-sent events for live
+updates. [`PROCESS.md`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/PROCESS.md)
+explains why I chose that stack and how the game reached this version.
