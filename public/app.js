@@ -1,5 +1,5 @@
 import { PALETTES } from "./palettes.js";
-import { WALL, drawDrip, drawEdge, drawPaint, drawRoller, drawTag, drawWall, makeView, paintPaths, shade } from "./render.js";
+import { WALL, drawDrip, drawEdge, drawRoller, drawTag, drawWall, makeView, paintTexture, shade } from "./render.js";
 
 const $ = (s) => document.querySelector(s);
 const canvas = $("#wall");
@@ -12,7 +12,27 @@ const wallLayer = document.createElement("canvas");
 const wallCtx = wallLayer.getContext("2d");
 const paintLayer = document.createElement("canvas");
 const paintCtx = paintLayer.getContext("2d");
+const shadowLayer = document.createElement("canvas");
+const shadowCtx = shadowLayer.getContext("2d");
 const LAYER_SCALE = 1.5;
+const PAINT_SCALE = 4; // four texture pixels per scored cell; scaled smoothly on screen
+const showPerf = new URLSearchParams(location.search).has("perf");
+const perf = { gap: [], frame: [], fallback: [], texture: [], mini: [], stream: [] };
+const perfEl = showPerf ? document.createElement("pre") : null;
+if (perfEl) {
+  perfEl.id = "perf";
+  perfEl.style.cssText = "position:fixed;z-index:20;left:10px;top:190px;padding:8px;background:#111;color:#fff;font:12px monospace;pointer-events:none";
+  document.body.append(perfEl);
+  setInterval(() => {
+    perfEl.textContent = Object.entries(perf).map(([name, xs]) => {
+      const n = xs.length, avg = n ? xs.reduce((a, b) => a + b, 0) / n : 0;
+      const max = n ? Math.max(...xs) : 0;
+      xs.length = 0;
+      return `${name}: ${n} avg ${avg.toFixed(1)} max ${max.toFixed(1)} ms`;
+    }).join("\n");
+  }, 2000);
+}
+function measure(name, ms) { if (showPerf) perf[name].push(ms); }
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
@@ -30,9 +50,9 @@ let cells = null; // owner per cell: 0 bare, 1 team 0, 2 team 1
 let painted = null; // game-clock ms each cell was last painted
 let gameNow = 0;
 let score = [0, 0];
-let paths = null; // paint shapes, rebuilt when the paint changes
-let pathsAt = -Infinity;
-let pathsDirty = true;
+let paintImage = null, shadowImage = null;
+let textureAt = -Infinity;
+let textureDirty = true;
 let paintPalette = "";
 let drips = [];
 const rollers = new Map(); // id -> { team, npc, name, move, x, y, h (shown), tx, ty, th (latest from server) }
@@ -56,30 +76,31 @@ function resize() {
 function prepareLayers() {
   const a = game.arena;
   const width = a.x1 - a.x0, height = a.y1 - a.y0;
-  for (const layer of [wallLayer, paintLayer]) {
-    layer.width = Math.round(width * LAYER_SCALE);
-    layer.height = Math.round(height * LAYER_SCALE);
+  wallLayer.width = Math.round(width * LAYER_SCALE);
+  wallLayer.height = Math.round(height * LAYER_SCALE);
+  for (const layer of [paintLayer, shadowLayer]) {
+    layer.width = game.cols * PAINT_SCALE;
+    layer.height = game.rows * PAINT_SCALE;
   }
+  paintImage = paintCtx.createImageData(paintLayer.width, paintLayer.height);
+  shadowImage = shadowCtx.createImageData(shadowLayer.width, shadowLayer.height);
   wallCtx.setTransform(LAYER_SCALE, 0, 0, LAYER_SCALE, -a.x0 * LAYER_SCALE, -a.y0 * LAYER_SCALE);
   drawWall(wallCtx, a, 1);
-  pathsAt = -Infinity;
-  pathsDirty = true;
+  textureAt = -Infinity;
+  textureDirty = true;
   paintPalette = "";
 }
 
 function updatePaintLayer() {
-  const rebuild = !paths || (pathsDirty && gameNow - pathsAt >= 180) || gameNow - pathsAt >= 500;
-  if (!rebuild && paintPalette === palette.id) return;
-  if (rebuild) {
-    paths = paintPaths(cells, painted, gameNow, game);
-    pathsAt = gameNow;
-    pathsDirty = false;
-  }
-  const a = game.arena;
-  paintCtx.setTransform(1, 0, 0, 1, 0, 0);
-  paintCtx.clearRect(0, 0, paintLayer.width, paintLayer.height);
-  paintCtx.setTransform(LAYER_SCALE, 0, 0, LAYER_SCALE, -a.x0 * LAYER_SCALE, -a.y0 * LAYER_SCALE);
-  drawPaint(paintCtx, paths, palette.teams.map((t) => t.color));
+  if (!textureDirty && gameNow - textureAt < 500 && paintPalette === palette.id) return;
+  if (textureDirty && gameNow - textureAt < 180 && paintPalette === palette.id) return;
+  const started = performance.now();
+  paintTexture(cells, painted, gameNow, game, palette.teams.map((t) => t.color), paintImage.data, shadowImage.data, PAINT_SCALE);
+  paintCtx.putImageData(paintImage, 0, 0);
+  shadowCtx.putImageData(shadowImage, 0, 0);
+  measure("texture", performance.now() - started);
+  textureAt = gameNow;
+  textureDirty = false;
   paintPalette = palette.id;
 }
 
@@ -116,7 +137,13 @@ function render(dt) {
   ctx.setTransform(...v.plane(dpr));
   ctx.drawImage(wallLayer, a.x0, a.y0, a.x1 - a.x0, a.y1 - a.y0);
   updatePaintLayer();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(a.x0, a.y0, a.x1 - a.x0, a.y1 - a.y0);
+  ctx.clip();
+  ctx.drawImage(shadowLayer, a.x0, a.y0 + 2.5, a.x1 - a.x0, a.y1 - a.y0);
   ctx.drawImage(paintLayer, a.x0, a.y0, a.x1 - a.x0, a.y1 - a.y0);
+  ctx.restore();
 
   // everything standing out from the wall, in screen pixels
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -131,13 +158,34 @@ function render(dt) {
   }
 }
 
-let last = performance.now(), lastMini = 0;
+let last = performance.now(), lastMini = 0, lastDrawn = 0;
 function frame(t) {
-  const dt = Math.min(0.1, (t - last) / 1000);
+  const gap = t - last;
+  measure("gap", gap);
+  const dt = Math.min(0.1, gap / 1000);
   last = t;
+  const started = performance.now();
   render(dt);
-  if (t - lastMini > 200) { minimap(); lastMini = t; }
+  if (t - lastMini > 200) {
+    const miniStarted = performance.now();
+    minimap(); lastMini = t;
+    measure("mini", performance.now() - miniStarted);
+  }
+  measure("frame", performance.now() - started);
+  lastDrawn = performance.now();
   requestAnimationFrame(frame);
+}
+
+// Some embedded browsers schedule requestAnimationFrame only once a second
+// even while reporting the page as visible. The live stream still arrives at
+// 10 Hz, so it can keep the wall moving until normal animation resumes.
+function drawOnStream() {
+  if (document.hidden || performance.now() - lastDrawn < 80) return;
+  const started = performance.now();
+  render(0.1);
+  minimap();
+  lastDrawn = performance.now();
+  measure("fallback", lastDrawn - started);
 }
 
 // The whole wall in the corner: paint, every roller, and the part you're seeing.
@@ -277,18 +325,22 @@ async function loadState() {
   applyRollers(s.rollers, true);
   const mine = me && rollers.get(me.id);
   if (mine) { cam.x = mine.x; cam.y = mine.y; }
-  pathsDirty = true;
+  textureDirty = true;
   hud();
 }
 
 function connect() {
   let first = true;
+  let lastStream = 0;
   const es = new EventSource("/api/events");
   es.onopen = () => {
     if (!first) loadState().catch(() => {}); // catch up on whatever we missed
     first = false;
   };
   es.onmessage = (e) => {
+    const arrived = performance.now();
+    if (lastStream) measure("stream", arrived - lastStream);
+    lastStream = arrived;
     const m = JSON.parse(e.data);
     if (m.type !== "tick" || !game) return;
     gameNow = m.t;
@@ -296,11 +348,12 @@ function connect() {
       cells[m.c[i]] = m.c[i + 1];
       painted[m.c[i]] = m.t;
     }
-    if (m.c.length) pathsDirty = true;
+  if (m.c.length) textureDirty = true;
     score = m.s;
     drips = m.d ?? [];
     applyRollers(m.r, false);
     hud();
+    drawOnStream();
   };
 }
 

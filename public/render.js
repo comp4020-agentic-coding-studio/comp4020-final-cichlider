@@ -1,8 +1,7 @@
 // How the wall and the rollers look. The wall is upright and seen almost face
 // on: only a slight tilt, so the rollers standing out from it, and the wall's
-// own thickness along the bottom, read as 2.5D. Paint is drawn as vector shapes
-// built from the server's grid, so it stays sharp at any zoom, and every shape
-// sits on exactly the cells that are scored.
+// own thickness along the bottom, read as 2.5D. Paint is a small texture built
+// from the server's grid, so drawing cost stays bounded as the wall fills up.
 
 export const WALL = "#dcd9e2";
 const TILT_Y = 0.94; // how much the wall's height is foreshortened
@@ -79,73 +78,63 @@ export function drawEdge(ctx, v, a, dark) {
 
 // ---------------------------------------------------------------- paint
 
-// Paint for one team, as shapes: marching squares over the cell centres, so the
-// edge of a patch is a smooth outline that follows exactly the cells that are
-// scored. Each team's shape goes in one path and is filled once, so the little
-// squares never show seams. Three nested layers by age: everything, the
-// not-yet-fading, and the fresh, so old paint can be drawn paler without gaps.
-export function paintPaths(cells, painted, now, g) {
-  const out = [0, 1].map(() => [new Path2D(), new Path2D(), new Path2D()]);
-  const limits = [Infinity, g.fadeMs * 0.8, g.fadeMs * 0.6];
-  const { cols, rows, cell } = g;
-  const X = (i) => g.arena.x0 + (i + 0.5) * cell, Y = (j) => g.arena.y0 + (j + 0.5) * cell;
-  const on = new Uint8Array((cols + 2) * (rows + 2)); // padded with bare floor all round
-  const at = (i, j) => on[(j + 1) * (cols + 2) + i + 1];
-  for (const team of [0, 1]) {
-    for (let layer = 0; layer < 3; layer++) {
-      on.fill(0);
-      let any = false;
-      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
-        const k = j * cols + i;
-        if (cells[k] === team + 1 && now - painted[k] < limits[layer]) { on[(j + 1) * (cols + 2) + i + 1] = 1; any = true; }
-      }
-      if (!any) continue;
-      const path = out[team][layer];
-      for (let j = -1; j < rows; j++) for (let i = -1; i < cols; i++) {
-        const a = at(i, j), b = at(i + 1, j), c = at(i + 1, j + 1), d = at(i, j + 1);
-        const n = a + b + c + d;
-        if (n === 0) continue;
-        if (n === 4) { path.rect(X(i), Y(j), cell, cell); continue; }
-        // walk the square's corners and edge midpoints clockwise, keeping painted
-        // corners and the midpoint of every edge where paint starts or stops
-        const pts = [];
-        if (a) pts.push(X(i), Y(j));
-        if (a !== b) pts.push(X(i) + cell / 2, Y(j));
-        if (b) pts.push(X(i + 1), Y(j));
-        if (b !== c) pts.push(X(i + 1), Y(j) + cell / 2);
-        if (c) pts.push(X(i + 1), Y(j + 1));
-        if (c !== d) pts.push(X(i) + cell / 2, Y(j + 1));
-        if (d) pts.push(X(i), Y(j + 1));
-        if (d !== a) pts.push(X(i), Y(j) + cell / 2);
-        path.moveTo(pts[0], pts[1]);
-        for (let q = 2; q < pts.length; q += 2) path.lineTo(pts[q], pts[q + 1]);
-        path.closePath();
-      }
+// Interpolate the authoritative cell grid onto a small texture. Coverage
+// tapers between cell centres, like the old marching-squares outline, but no
+// Path2D objects are built as the wall fills. A pixel keeps the stronger team
+// colour at a contested edge, avoiding muddy mixed-colour seams.
+export function paintTexture(cells, painted, now, g, colors, out, shadow, scale) {
+  const { cols, rows } = g;
+  const alpha0 = new Float32Array(cells.length), alpha1 = new Float32Array(cells.length);
+  const fresh0 = new Uint8Array(cells.length), fresh1 = new Uint8Array(cells.length);
+  for (let i = 0; i < cells.length; i++) {
+    const owner = cells[i];
+    if (!owner) continue;
+    const age = now - painted[i];
+    const fresh = age < g.fadeMs * 0.6;
+    const opacity = fresh ? 1 : age < g.fadeMs * 0.8 ? 0.7 : 0.4;
+    if (owner === 1) { alpha0[i] = opacity; fresh0[i] = +fresh; }
+    else { alpha1[i] = opacity; fresh1[i] = +fresh; }
+  }
+  const rgb = colors.map((h) => {
+    const n = parseInt(h.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  });
+  const width = cols * scale, height = rows * scale;
+  for (let y = 0; y < height; y++) {
+    const gy = (y + 0.5) / scale - 0.5;
+    const row = Math.floor(gy), fy = gy - row;
+    const row0 = row >= 0 ? row * cols : -1;
+    const row1 = row + 1 < rows ? (row + 1) * cols : -1;
+    for (let x = 0; x < width; x++) {
+      const gx = (x + 0.5) / scale - 0.5;
+      const col = Math.floor(gx), fx = gx - col;
+      const c0 = col >= 0 ? col : -1, c1 = col + 1 < cols ? col + 1 : -1;
+      const i00 = row0 >= 0 && c0 >= 0 ? row0 + c0 : -1;
+      const i10 = row0 >= 0 && c1 >= 0 ? row0 + c1 : -1;
+      const i01 = row1 >= 0 && c0 >= 0 ? row1 + c0 : -1;
+      const i11 = row1 >= 0 && c1 >= 0 ? row1 + c1 : -1;
+      const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy);
+      const w01 = (1 - fx) * fy, w11 = fx * fy;
+      const sample = (a) =>
+        (i00 < 0 ? 0 : a[i00] * w00) + (i10 < 0 ? 0 : a[i10] * w10) +
+        (i01 < 0 ? 0 : a[i01] * w01) + (i11 < 0 ? 0 : a[i11] * w11);
+      const a0 = sample(alpha0), a1 = sample(alpha1);
+      const p = (y * width + x) * 4;
+      if (a0 + a1 > 0) {
+        const c = rgb[a0 >= a1 ? 0 : 1];
+        out[p] = c[0]; out[p + 1] = c[1]; out[p + 2] = c[2];
+        out[p + 3] = Math.round((a0 + a1) * 255);
+      } else out[p] = out[p + 1] = out[p + 2] = out[p + 3] = 0;
+      const f0 = sample(fresh0), f1 = sample(fresh1);
+      if (f0 + f1 > 0) {
+        const c = rgb[f0 >= f1 ? 0 : 1];
+        shadow[p] = Math.round(c[0] * 0.6);
+        shadow[p + 1] = Math.round(c[1] * 0.6);
+        shadow[p + 2] = Math.round(c[2] * 0.6);
+        shadow[p + 3] = Math.round((f0 + f1) * 140);
+      } else shadow[p] = shadow[p + 1] = shadow[p + 2] = shadow[p + 3] = 0;
     }
   }
-  return out;
-}
-
-// Wet paint: a darker under-layer a touch lower, then the colour, paler where
-// it's old. Drawn in wall coordinates (under plane()).
-export function drawPaint(ctx, paths, colors) {
-  for (const team of [0, 1]) {
-    const [all, mid, fresh] = paths[team];
-    ctx.save();
-    ctx.translate(0, 2.5);
-    ctx.globalAlpha = 0.55;
-    ctx.fillStyle = shade(colors[team], -0.4);
-    ctx.fill(fresh);
-    ctx.restore();
-    ctx.fillStyle = colors[team];
-    ctx.globalAlpha = 0.4;
-    ctx.fill(all);
-    ctx.globalAlpha = 0.5;
-    ctx.fill(mid);
-    ctx.globalAlpha = 1;
-    ctx.fill(fresh);
-  }
-  ctx.globalAlpha = 1;
 }
 
 // The bead of paint at the bottom of a running drip.

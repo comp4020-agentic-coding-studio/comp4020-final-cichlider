@@ -93,13 +93,16 @@ records that deployed rehearsal.
 ## What remains to judge
 
 A Canberra playtest on 1 November exposed severe frame drops even though the
-deployed event stream delivered ticks roughly 100 ms apart. The browser was
-rebuilding paint paths and filling them on the full-screen canvas every few
-frames, at up to 3× display pixel density. I changed the renderer to cache
-the wall and paint in separate layers, redraw the paint layer only when its
-contents age or change, and cap display density at 1.5×. The full automated
-suite and a local visual check passed after the change; its effect on the
-Canberra machine still needs a live playtest after deployment.
+deployed event stream delivered ticks roughly 100 ms apart. My first fix
+cached the wall and paint and capped display density at 1.5×, but another
+Canberra playtest was still severely choppy. I then instrumented the browser
+at 1920×1080: as the wall filled, building the paint paths took about 160 ms
+every few frames. I replaced those paths with a fixed-size texture generated
+from the same scored grid, and let incoming ticks draw when a browser limits
+animation frames. The busy-wall local run then rendered about 120 frames in
+two seconds, with texture updates around 9–12 ms. The automated suite and
+desktop and phone visual checks passed. The Canberra machine still needs a
+new live playtest after deployment.
 
 The automated checks cover the rules and a local sub-second stream, and the
 deployed rehearsal covers two distinct identities. They do not decide whether

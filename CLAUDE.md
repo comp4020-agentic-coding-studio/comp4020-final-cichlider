@@ -14,8 +14,8 @@ the wall's rules are now reversed on purpose. Don't bring them back.
   `server/world.ts`), then goes through the same `step()`.
 - Never protect paint from being rolled over. The later roller owns the cell
   (`docs/decisions/0002-last-roller-wins.md`).
-- Never make what's drawn differ from what's scored. The client outlines the
-  server's grid (marching squares in `render.js`); drips are simulated on the
+- Never make what's drawn differ from what's scored. The client makes its
+  paint texture from the server's grid (`render.js`); drips are simulated on the
   server and paint the grid like rollers do. Don't add client-side paint, drips
   or splashes that the grid doesn't have.
 - Never let the game clock run with nobody on the floor, or age paint by the
