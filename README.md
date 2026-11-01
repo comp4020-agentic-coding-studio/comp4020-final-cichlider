@@ -43,7 +43,7 @@ overwriting and fading turn that shared surface into a continuing game.
 | Two separate browsers can play together but cannot steer or rename one another | Server-side identity checks in [`spec/turf.test.ts`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/spec/turf.test.ts); [authority decision](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/docs/decisions/0004-browser-identity-and-authority.md) |
 | Another open session sees a roller move within about a second | A timed live-stream check in `spec/turf.test.ts` |
 | The painted wall and score agree, including drips, overwriting and fading | Pure rules in `spec/grid.test.ts` and `spec/world.test.ts`, plus server checks in `spec/turf.test.ts` |
-| The wall survives a restart and stops ageing when empty | Save/restore check in `spec/grid.test.ts`; a manual restart and idle-clock check recorded in [`PROCESS.md`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/PROCESS.md) |
+| The wall survives a restart and stops ageing when empty | Save/restore check in `spec/grid.test.ts`; manual restart, next-day return and idle-clock checks recorded in [`PROCESS.md`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/blob/main/PROCESS.md) |
 | Playing feels immediate and the territory remains readable | Judged by a smooth two-person field test and desktop and phone layout checks |
 
 The browser holds a random player secret; the server uses it to authorise only

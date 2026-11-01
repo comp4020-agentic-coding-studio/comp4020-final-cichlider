@@ -90,7 +90,7 @@ attributed their actions to separate IDs; the documented C10 run,
 [`5505021`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-cichlider/commit/5505021),
 records that deployed rehearsal.
 
-## What remains to judge
+## Field tests and limits
 
 A Canberra playtest on 1 November exposed severe frame drops even though the
 deployed event stream delivered ticks roughly 100 ms apart. My first fix
@@ -111,7 +111,7 @@ still readable. I judged the earlier versions by playing them and checking
 desktop and touch screenshots; the final version then passed a two-person
 field test in Canberra. Persistence has a deliberate limit: the floor is saved
 every five seconds and on clean shutdown, so an abrupt crash can lose up to
-five seconds of paint. A manual stop/start restored the clock and score; a
-next-day return after an actual Fly restart remains to be checked before the
-final deadline. I would rather state those limits than claim that a green
-check alone proves the experience is good.
+five seconds of paint. A manual stop/start restored the clock and score; on a
+next-day return, the painted wall and score were still present. I would rather
+state those limits than claim that a green check alone proves the experience
+is good.
