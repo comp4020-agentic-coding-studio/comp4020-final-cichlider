@@ -101,8 +101,8 @@ every few frames. I replaced those paths with a fixed-size texture generated
 from the same scored grid, and let incoming ticks draw when a browser limits
 animation frames. The busy-wall local run then rendered about 120 frames in
 two seconds, with texture updates around 9–12 ms. The automated suite and
-desktop and phone visual checks passed. The Canberra machine still needs a
-new live playtest after deployment.
+desktop and phone visual checks passed. The Canberra playtest after deployment
+found the game no longer choppy.
 
 The automated checks cover the rules and a local sub-second stream, and the
 deployed rehearsal covers two distinct identities. They do not decide whether
