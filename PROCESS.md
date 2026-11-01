@@ -101,15 +101,15 @@ every few frames. I replaced those paths with a fixed-size texture generated
 from the same scored grid, and let incoming ticks draw when a browser limits
 animation frames. The busy-wall local run then rendered about 120 frames in
 two seconds, with texture updates around 9–12 ms. The automated suite and
-desktop and phone visual checks passed. The Canberra playtest after deployment
-found the game no longer choppy.
+desktop and phone visual checks passed. A post-deployment Canberra two-person
+playtest found the game smooth.
 
 The automated checks cover the rules and a local sub-second stream, and the
 deployed rehearsal covers two distinct identities. They do not decide whether
 the roller feels responsive to a newcomer on a phone or whether a busy wall is
 still readable. I judged the earlier versions by playing them and checking
-desktop and touch screenshots; the final version still needs a fresh
-two-person field test. Persistence has a deliberate limit: the floor is saved
+desktop and touch screenshots; the final version then passed a two-person
+field test in Canberra. Persistence has a deliberate limit: the floor is saved
 every five seconds and on clean shutdown, so an abrupt crash can lose up to
 five seconds of paint. A manual stop/start restored the clock and score; a
 next-day return after an actual Fly restart remains to be checked before the
