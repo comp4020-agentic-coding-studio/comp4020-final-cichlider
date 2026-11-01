@@ -8,6 +8,11 @@ const mini = $("#mini");
 const mctx = mini.getContext("2d");
 const miniSrc = document.createElement("canvas"); // one pixel per cell, for the minimap
 const msctx = miniSrc.getContext("2d");
+const wallLayer = document.createElement("canvas");
+const wallCtx = wallLayer.getContext("2d");
+const paintLayer = document.createElement("canvas");
+const paintCtx = paintLayer.getContext("2d");
+const LAYER_SCALE = 1.5;
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
@@ -28,6 +33,7 @@ let score = [0, 0];
 let paths = null; // paint shapes, rebuilt when the paint changes
 let pathsAt = -Infinity;
 let pathsDirty = true;
+let paintPalette = "";
 let drips = [];
 const rollers = new Map(); // id -> { team, npc, name, move, x, y, h (shown), tx, ty, th (latest from server) }
 let palette = PALETTES.find((p) => p.id === store.get("turf.palette", "default")) ?? PALETTES[0];
@@ -38,11 +44,43 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 // ---------------------------------------------------------------- drawing
 
 function resize() {
-  dpr = Math.min(window.devicePixelRatio || 1, 3);
+  // A 3x full-screen canvas is expensive on laptops and phones, especially
+  // while the wall is moving. Keep the game responsive on high-DPI displays.
+  dpr = Math.min(window.devicePixelRatio || 1, 1.5);
   W = window.innerWidth;
   H = window.innerHeight;
   canvas.width = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
+}
+
+function prepareLayers() {
+  const a = game.arena;
+  const width = a.x1 - a.x0, height = a.y1 - a.y0;
+  for (const layer of [wallLayer, paintLayer]) {
+    layer.width = Math.round(width * LAYER_SCALE);
+    layer.height = Math.round(height * LAYER_SCALE);
+  }
+  wallCtx.setTransform(LAYER_SCALE, 0, 0, LAYER_SCALE, -a.x0 * LAYER_SCALE, -a.y0 * LAYER_SCALE);
+  drawWall(wallCtx, a, 1);
+  pathsAt = -Infinity;
+  pathsDirty = true;
+  paintPalette = "";
+}
+
+function updatePaintLayer() {
+  const rebuild = !paths || (pathsDirty && gameNow - pathsAt >= 180) || gameNow - pathsAt >= 500;
+  if (!rebuild && paintPalette === palette.id) return;
+  if (rebuild) {
+    paths = paintPaths(cells, painted, gameNow, game);
+    pathsAt = gameNow;
+    pathsDirty = false;
+  }
+  const a = game.arena;
+  paintCtx.setTransform(1, 0, 0, 1, 0, 0);
+  paintCtx.clearRect(0, 0, paintLayer.width, paintLayer.height);
+  paintCtx.setTransform(LAYER_SCALE, 0, 0, LAYER_SCALE, -a.x0 * LAYER_SCALE, -a.y0 * LAYER_SCALE);
+  drawPaint(paintCtx, paths, palette.teams.map((t) => t.color));
+  paintPalette = palette.id;
 }
 
 // Close enough to see your roller and the paint around it.
@@ -73,20 +111,12 @@ function render(dt) {
   const v = makeView(cam, W, H);
   const a = game.arena;
 
-  // the wall and its paint, in wall coordinates
+  // The wall and paint are cached at wall resolution. Only the camera and the
+  // rollers need fresh drawing every frame.
   ctx.setTransform(...v.plane(dpr));
-  drawWall(ctx, a, v.k);
-  if ((pathsDirty && gameNow - pathsAt > 120) || gameNow - pathsAt > 500) {
-    paths = paintPaths(cells, painted, gameNow, game);
-    pathsAt = gameNow;
-    pathsDirty = false;
-  }
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(a.x0, a.y0, a.x1 - a.x0, a.y1 - a.y0);
-  ctx.clip();
-  drawPaint(ctx, paths, palette.teams.map((t) => t.color));
-  ctx.restore();
+  ctx.drawImage(wallLayer, a.x0, a.y0, a.x1 - a.x0, a.y1 - a.y0);
+  updatePaintLayer();
+  ctx.drawImage(paintLayer, a.x0, a.y0, a.x1 - a.x0, a.y1 - a.y0);
 
   // everything standing out from the wall, in screen pixels
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -234,6 +264,7 @@ const unbase64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 async function loadState() {
   const s = await api("GET", "/api/state");
   game = s;
+  prepareLayers();
   cells = unbase64(s.owners);
   const ages = new Uint16Array(unbase64(s.ages).buffer);
   painted = new Float64Array(cells.length);

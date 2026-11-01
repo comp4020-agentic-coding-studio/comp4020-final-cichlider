@@ -92,6 +92,15 @@ records that deployed rehearsal.
 
 ## What remains to judge
 
+A Canberra playtest on 1 November exposed severe frame drops even though the
+deployed event stream delivered ticks roughly 100 ms apart. The browser was
+rebuilding paint paths and filling them on the full-screen canvas every few
+frames, at up to 3× display pixel density. I changed the renderer to cache
+the wall and paint in separate layers, redraw the paint layer only when its
+contents age or change, and cap display density at 1.5×. The full automated
+suite and a local visual check passed after the change; its effect on the
+Canberra machine still needs a live playtest after deployment.
+
 The automated checks cover the rules and a local sub-second stream, and the
 deployed rehearsal covers two distinct identities. They do not decide whether
 the roller feels responsive to a newcomer on a phone or whether a busy wall is
